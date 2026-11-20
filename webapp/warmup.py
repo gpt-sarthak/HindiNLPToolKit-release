@@ -1,0 +1,100 @@
+"""
+webapp.warmup
+=============
+Background pre-warming of the heavy lazily-loaded models, so the *first* user
+job after a fresh start is fast (cold container: ~223 s for the first job vs
+~10 s warm — dominated by Stanza init and the LSTM checkpoint).
+
+Runs on a daemon thread started from the FastAPI lifespan hook, so the server
+binds and serves immediately while models load behind it.  Targets are warmed
+cheap-first (Stanza → trigram → LSTM-Wiki50M → one throwaway adaptation step)
+and each one just calls its own
+lazy, thread-safe singleton loader — a job that races the warm-up blocks on
+the same lock instead of loading twice.
+
+Set ``HNT_NO_PREWARM=1`` to skip warming entirely (light local dev server).
+
+``berkeley_pcfg`` / ``surprisal`` are not warmed: they shell out to the
+Berkeley jar per call, so there is nothing to keep in memory.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import threading
+import time
+
+# uvicorn's error logger is the one whose output reaches the console/container
+# logs; plain module loggers have no handler under uvicorn's default config.
+logger = logging.getLogger("uvicorn.error")
+
+
+def _warm_stanza() -> None:
+    from stanza_parser.parser import _get_stanza_pipeline
+
+    _get_stanza_pipeline("hi")
+
+
+def _warm_trigram() -> None:
+    from scoring._katz_trigram import get_lm
+
+    get_lm()
+
+
+def _warm_lstm_wiki50m() -> None:
+    from scoring._lstm_wiki50m import get_lstm_wiki50m
+
+    get_lstm_wiki50m()
+
+
+def _warm_adaptation() -> None:
+    """One throwaway SGD step on a private copy of the Wiki-50M LSTM.
+
+    The first backward pass in a process pays a one-time autograd / oneDNN
+    set-up of ~1.8 s (measured 2026-10-04: 1,847 ms, then ~55 ms per step
+    after).  Without this, the first adaptive-LSTM job after a restart absorbs
+    it.  The copy is discarded; the shared model is untouched.  The sentence is
+    plain Devanagari because this model's ``normalize`` strips everything else.
+    """
+    from scoring._lstm_engine import AdaptationCopy
+    from scoring._lstm_wiki50m import adapt_one_step, get_lstm_wiki50m
+
+    model, word2idx, device = get_lstm_wiki50m()
+    adapt_one_step("यह एक वाक्य है", AdaptationCopy(model).fresh(), word2idx, device)
+
+
+# Cheap first: Stanza serves Sentence-mode parses immediately.  The trigram
+# model is memory-mapped and effectively free, but it is warmed anyway so a
+# first job never pays even that.  Then the Wiki-50M LSTM checkpoint and its
+# adaptation step.
+_TARGETS = [
+    ("stanza", _warm_stanza),
+    ("trigram", _warm_trigram),
+    ("lstm_wiki50m", _warm_lstm_wiki50m),
+    ("adaptation", _warm_adaptation),
+]
+
+
+def warm_models() -> None:
+    """Load every warm target in order; a failure (e.g. gitignored model files
+    absent locally) is logged and skipped, never raised."""
+    for name, load in _TARGETS:
+        start = time.perf_counter()
+        try:
+            load()
+            logger.info("warmup: %s ready in %.1fs", name, time.perf_counter() - start)
+        except Exception as exc:
+            logger.warning("warmup: %s skipped (%s)", name, exc)
+    logger.info("warmup: done")
+
+
+def start_background_warmup() -> threading.Thread | None:
+    """Kick off :func:`warm_models` on a daemon thread and return it, or return
+    ``None`` without warming when ``HNT_NO_PREWARM`` is set."""
+    if os.environ.get("HNT_NO_PREWARM"):
+        logger.info("warmup: disabled (HNT_NO_PREWARM set)")
+        return None
+    thread = threading.Thread(target=warm_models, name="model-warmup", daemon=True)
+    thread.start()
+    return thread

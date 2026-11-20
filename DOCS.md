@@ -1,0 +1,1472 @@
+# Hindi NLP Toolkit — Documentation
+
+A Python library for filtering Hindi CoNLL-U sentences and generating
+preverbal constituent order variants for dependency-length research.
+
+---
+
+## Setup
+
+See the README for the full install. In short (Python 3.11):
+
+```bash
+python -m venv venv
+source venv/bin/activate            # Windows: .\venv\Scripts\Activate.ps1
+pip install torch==2.12.0 --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt -c constraints.txt
+```
+
+The trained scorer models go in `scoring/models/` (build them with
+`training/`, see `training/README.md`).
+
+---
+
+## Importing
+
+```python
+from stanza_parser import load_input                      # unified loader
+
+from filtering import filter_sentences, summarize         # combined pipeline
+from filtering import (                                   # individual filters
+    filter_questions,
+    filter_negatives,
+    filter_ghost_ids,
+    filter_non_projective,
+    filter_bad_root,
+    filter_punct_constituents,
+    filter_min_phrases,
+)
+
+from variants import generate_variants
+```
+
+---
+
+## Quick start
+
+```python
+from stanza_parser import load_input
+from filtering import filter_sentences, summarize
+from variants import generate_variants
+
+# 1. Load
+sentences = load_input("data/fact_media_news_ISCNLP.conllu")
+
+# 2. Filter (full pipeline)
+passed, rejected_df, passed_df = filter_sentences(sentences, output_dir="output/")
+
+# 3. Generate variants (surface pairs only — no features)
+pairs_df = generate_variants(passed, output_dir="output/")
+
+# 4. Score (features live in the scoring package)
+from scoring import apply_scorers, build_corpus_context
+pairs_df = apply_scorers(
+    pairs_df,
+    ["dependency_length", "information_status"],
+    context={"corpus": build_corpus_context(sentences), "passed": passed, "scheme": "paninian"},
+)
+
+# 5. Summarize
+print(summarize(passed, rejected_df))
+```
+
+---
+
+## Function Reference
+
+### `load_input(source)`
+
+Loads sentences from a file or a raw Hindi string.
+
+| Input | Behaviour |
+|---|---|
+| Path ending in `.conllu` | Parsed directly with the `conllu` library. No model needed. |
+| Path ending in `.txt` | Each non-empty line parsed as one sentence via Stanza (Hindi). |
+| Raw Hindi string | Parsed via Stanza (Hindi). Model downloaded automatically on first use. |
+
+**Returns** `List[TokenList]` — list of `conllu` TokenList objects. Each one
+carries `metadata["hnt_index"]`, its 1-based position in *source*, stamped
+**before** any filtering — it becomes the pairs table's `Ref_Index` (see
+*Reference grouping* under Helpers).
+
+**Raises**
+- `FileNotFoundError` — if a `.conllu` or `.txt` path does not exist.
+- `ValueError` — if the source is empty or contains no parseable content.
+- `ImportError` — if Stanza is not installed and is needed.
+
+```python
+sents = load_input("corpus.conllu")
+sents = load_input("sentences.txt")          # one sentence per line
+sents = load_input("राम घर जाता है।")       # raw Hindi string
+```
+
+---
+
+### `filter_sentences(sentences, allowed_root_pos=None, min_phrases=2, output_dir=None, subject_deprels=None, object_deprels=None, require_core_args=True)`
+
+Applies all seven linguistic filters in sequence. A sentence must pass **all**
+filters to be included. Internally calls the seven individual filter functions
+in order — no logic is duplicated.
+
+#### Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `sentences` | — | `List[TokenList]` from `load_input()`. |
+| `allowed_root_pos` | `None` | POS tags accepted on the dependency root (filter 5). `None` uses `["VERB", "AUX", "VM", "VAUX"]`. Extend to `["VERB", "AUX", "NOUN", "ADJ", "PROPN"]` only if copular clauses are relevant to your study — see the UD note below. |
+| `min_phrases` | `2` | Minimum preverbal constituents required (filter 7). Must be ≥ 1. |
+| `output_dir` | `None` | If given, writes `passed_sentences.csv` and `rejected_sentences.csv` to this directory. |
+| `subject_deprels` | `None` | Relations counted as a subject (filter 7). `None` uses `("nsubj", "nsubj:pass", "k1")` — both schemes at once, safe because they share no label. |
+| `object_deprels` | `None` | Relations counted as an object (filter 7). `None` uses `("obj", "iobj", "k2", "k4")`; indirect objects count. Pass `["obj", "k2"]` for direct objects only. |
+| `require_core_args` | `True` | Require a preverbal subject **and** object (filter 7). `False` restores count-only filtering. |
+
+#### Filter pipeline
+
+| # | Function | What it checks | Why |
+|---|---|---|---|
+| 1 | `filter_questions` | `?` in text, `WQ` POS tag, or `PronType=Int` feature | Questions have different word-order constraints |
+| 2 | `filter_negatives` | `NEG` POS tag or `Polarity=Neg` feature | Negation interacts with constituent order outside this model's scope |
+| 3 | `filter_ghost_ids` | Any token with a non-integer ID (e.g. `1.1`) | Empty nodes break position arithmetic |
+| 4 | `filter_non_projective` | Any pair of crossing dependency arcs | Non-projective structures cannot be represented by block permutations |
+| 5 | `filter_bad_root` | Missing root, or root POS not in `allowed_root_pos` | Preverbal constituent extraction is only defined for verb-headed clauses |
+| 6 | `filter_punct_constituents` | Any preverbal constituent whose head attachment to root has `deprel == "punct"` | A bare comma or punctuation mark treated as a free-floating block produces broken variants in every permutation |
+| 7 | `filter_min_phrases` | Fewer than `min_phrases` preverbal constituents, **or** no preverbal subject / no preverbal object | Need ≥ 2 to produce any non-trivial permutation, and criterion (a) of Ranjan & van Schijndel (2024) requires "well-defined subjects and objects" — a subject plus three obliques has nothing to reorder against |
+
+#### Returns
+
+| Name | Type | Description |
+|---|---|---|
+| `passed_list` | `List[Dict]` | Dicts with keys `sentence`, `root_id`, `constituents`. Direct input to `generate_variants()`. |
+| `rejected_df` | `DataFrame` | `Sent_ID`, `Ref_Index`, `Sentence`, `Reason` — one row per rejected sentence (`Ref_Index` = position in the submitted file; blank for sentences not loaded through `load_input`). |
+| `passed_df` | `DataFrame` | Rich feature table; see columns below. |
+
+**`passed_df` columns**
+
+| Column | Description |
+|---|---|
+| `Sent_ID` | Sentence identifier from CoNLL-U metadata |
+| `Ref_Index` | Position in the submitted file — the same value as the pairs table's `Ref_Index` |
+| `Sentence` | Surface text |
+| `Root_ID` | Token ID of the verbal root |
+| `Constituent_Count` | Number of preverbal constituents |
+| `Character_Length` | Character count of surface text |
+| `Sentence_Length` | Token count (integer IDs only) |
+| `Constituent_Lengths` | List of token counts per constituent |
+| `Deprel_Tags` | List of dependency relation labels per constituent |
+| `Grammatical_Pairs` | Adjacent `(deprel_A, deprel_B)` pairs in reference order |
+
+**Files saved** (when `output_dir` is given)
+- `passed_sentences.csv`
+- `rejected_sentences.csv`
+
+```python
+passed, rejected_df, passed_df = filter_sentences(sents, output_dir="output/")
+
+# UD corpus with copular constructions (ADJ/NOUN roots)
+passed, rejected_df, passed_df = filter_sentences(
+    sents,
+    allowed_root_pos=["VERB", "AUX", "NOUN", "ADJ", "PROPN"],
+    output_dir="output/",
+)
+
+# Require at least 3 preverbal constituents
+passed, rejected_df, passed_df = filter_sentences(sents, min_phrases=3)
+```
+
+---
+
+### Individual filter functions
+
+Each filter can be called independently, which is useful when you want to apply
+only a subset of filters, inspect intermediate results, or chain them in a
+custom order.
+
+**Type progression through the pipeline**
+
+Filters 1–4 accept and return `List[TokenList]`. Filter 5 (`filter_bad_root`)
+extracts preverbal constituents and switches the type to `List[Dict]`. Filters
+6–7 accept either type (they auto-detect from the first element).
+
+Every individual filter raises `ValueError` on empty input and returns
+`(passed, rejected_df)` where `rejected_df` always has columns
+`Sent_ID | Ref_Index | Sentence | Reason`.
+
+---
+
+#### `filter_questions(sentences, check_punct=True, check_pos=True, check_features=True)`
+
+Removes interrogative sentences. Three independent signals are checked; a
+sentence is rejected if any enabled signal fires.
+
+| Parameter | Default | Signal checked |
+|---|---|---|
+| `check_punct` | `True` | `?` anywhere in the surface text |
+| `check_pos` | `True` | Any token with `upos == "WQ"` (Paninian tagset) |
+| `check_features` | `True` | Any token with `PronType=Int` morphological feature (UD convention) |
+
+**Returns** `(List[TokenList], DataFrame)`
+
+```python
+passed, rej = filter_questions(sentences)
+
+# Skip the punctuation check (e.g. corpus uses ？ instead of ?)
+passed, rej = filter_questions(sentences, check_punct=False)
+
+# Disable all signals — passes everything (useful for testing)
+passed, rej = filter_questions(sentences, check_punct=False, check_pos=False, check_features=False)
+```
+
+---
+
+#### `filter_negatives(sentences, check_pos=True, check_features=True)`
+
+Removes sentences that contain negation.
+
+| Parameter | Default | Signal checked |
+|---|---|---|
+| `check_pos` | `True` | Any token with `upos == "NEG"` (Paninian tagset; fires only on ISCNLP-style corpora) |
+| `check_features` | `True` | Any token with `Polarity=Neg` morphological feature (UD convention; catches नहीं, मत, etc.) |
+
+**Returns** `(List[TokenList], DataFrame)`
+
+```python
+passed, rej = filter_negatives(sentences)
+```
+
+> **Note:** On UD-annotated corpora (e.g. Hindi-HDTB) the `check_pos` signal
+> fires zero times because UD does not use a `NEG` POS tag. All negation is
+> caught by `check_features`. Both signals can safely be left on for any corpus.
+
+---
+
+#### `filter_ghost_ids(sentences)`
+
+Removes sentences that contain non-integer (ghost/empty) token IDs such as
+`1.1` used in enhanced dependency graphs. These break all integer-position
+arithmetic used downstream.
+
+**Returns** `(List[TokenList], DataFrame)`
+
+```python
+passed, rej = filter_ghost_ids(sentences)
+```
+
+---
+
+#### `filter_non_projective(sentences)`
+
+Removes sentences whose dependency tree contains crossing arcs. Non-projective
+structures cannot be faithfully represented by constituent-block permutations.
+
+**Returns** `(List[TokenList], DataFrame)`
+
+```python
+passed, rej = filter_non_projective(sentences)
+```
+
+> **Corpus note:** UD-annotated Hindi (HDTB) has a non-projectivity rate of
+> ~12%, roughly 2.4× higher than Paninian-annotated corpora (~5%). This is a
+> genuine annotation-scheme difference, not a pipeline issue.
+
+---
+
+#### `filter_bad_root(sentences, allowed_pos=None)`
+
+Removes sentences whose dependency root is missing or carries a POS tag not in
+`allowed_pos`, then extracts preverbal constituents for sentences that pass.
+This is the point where the output type changes from `List[TokenList]` to
+`List[Dict]`.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `allowed_pos` | `None` | POS tags accepted on the root. `None` → `["VERB", "AUX", "VM", "VAUX"]`. |
+
+**Returns** `(List[Dict], DataFrame)`
+
+Each dict in the passed list has:
+- `sentence` — the original `TokenList`
+- `root_id` — integer token ID of the verbal root
+- `constituents` — `List[List[Dict]]`, one sub-list per preverbal constituent
+
+The `Reason` field in the rejection DataFrame includes the actual POS found,
+e.g. `"Non-verbal root: Root POS is 'NN', expected VERB/AUX/VM/VAUX"`.
+
+```python
+passed, rej = filter_bad_root(sentences)
+
+# UD corpus — allow nominal/adjectival roots from copular constructions
+passed, rej = filter_bad_root(sentences, allowed_pos=["VERB", "AUX", "NOUN", "ADJ", "PROPN"])
+```
+
+> **UD copular constructions:** In UD treebanks the predicate (ADJ or NOUN) is
+> the syntactic root when the copula `है` is annotated as `AUX/cop`. These
+> sentences are rejected by the default `allowed_pos`. Extend the list when
+> working with UD data if copular sentences are linguistically relevant to your
+> research.
+
+---
+
+#### `filter_punct_constituents(sentences_or_items, allowed_pos=None)`
+
+Removes sentences where any preverbal constituent's direct attachment to the
+root carries `deprel == "punct"`. In practice this is always a lone comma or
+quotation mark from a discourse-connector opening like `"लेकिन,"` or
+`"बहरहाल,"`, where UD annotation gives the connector and the comma separate
+head attachments to the verb.
+
+**Why this matters:** because constituent permutation treats every constituent
+as a free-floating block, a bare comma block moves freely to the middle or
+start of every variant, producing output that is ungrammatical in all
+permutations:
+
+```
+Reference : लेकिन , उसकी दृढ़ इच्छा के आगे उन्हें झुकना पड़ा ।   ✓
+Variant A : उसकी दृढ़ इच्छा के आगे , लेकिन उन्हें झुकना पड़ा ।   ✗
+Variant B : , उसकी दृढ़ इच्छा के आगे लेकिन उन्हें झुकना पड़ा ।   ✗
+            (all 23 permutations of this sentence are broken)
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `allowed_pos` | `None` | Only used when input is `List[TokenList]`. POS tags accepted on the root. |
+
+**Accepts** `List[TokenList]` or `List[Dict]` (output of `filter_bad_root`).  
+**Returns** `(List[Dict], DataFrame)`
+
+```python
+# Chained after filter_bad_root (typical use)
+items, _ = filter_bad_root(sentences)
+passed, rej = filter_punct_constituents(items)
+
+# Independent use on raw sentences
+passed, rej = filter_punct_constituents(sentences)
+```
+
+> **Corpus note:** This filter fires only on UD-annotated corpora. The ISCNLP
+> Paninian corpus has zero such sentences because Paninian annotation does not
+> attach punctuation as a direct preverbal arc to the root.
+
+---
+
+#### `filter_min_phrases(sentences_or_items, min_phrases=2, allowed_pos=None, subject_deprels=None, object_deprels=None, require_core_args=True)`
+
+Removes sentences whose preverbal domain cannot support the research question.
+Two conditions:
+
+1. **Count** — fewer than `min_phrases` preverbal constituents; at least two are
+   needed to produce any non-trivial permutation.
+2. **Core arguments** — the constituents must include both a subject and an
+   object. This is criterion (a) of Ranjan & van Schijndel (2024), *"the trees
+   contain both well-defined subjects and objects"*, and it is what makes the
+   SOV/OSV contrast meaningful: a subject plus three obliques satisfies the count
+   but has no object to move.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `min_phrases` | `2` | Minimum number of preverbal constituents required. Must be ≥ 1. |
+| `allowed_pos` | `None` | Only used when input is `List[TokenList]`. POS tags accepted on the root. |
+| `subject_deprels` | `None` | Relations counted as a subject. `None` uses `("nsubj", "nsubj:pass", "k1")`. |
+| `object_deprels` | `None` | Relations counted as an object. `None` uses `("obj", "iobj", "k2", "k4")`. |
+| `require_core_args` | `True` | `False` restores the historical count-only behaviour. |
+
+The deprel defaults union both annotation schemes, which is safe because UD and
+Paninian share no label and are never mixed in one call — the same reasoning
+behind the default root-POS tuple. `k1s` (predicative complement) and `pof`
+(conjunct-verb nominal) are deliberately **not** counted.
+
+Rejection `Reason` is `"Fewer than N preverbal constituent(s)"` for a count
+failure, or `"Missing preverbal subject"` / `"Missing preverbal object"` /
+`"Missing preverbal subject and object"`. `summarize()` groups all of them into
+the single `filter_order` entry *"Too few phrases or missing subject/object"*.
+
+**Accepts** `List[TokenList]` or `List[Dict]` (output of `filter_bad_root` /
+`filter_punct_constituents`). When given `List[Dict]`, pre-computed
+constituents are used directly — no re-extraction.  
+**Returns** `(List[Dict], DataFrame)`
+
+```python
+# Typical: chained after filter_punct_constituents
+items, _ = filter_bad_root(sentences)
+items, _ = filter_punct_constituents(items)
+passed, rej = filter_min_phrases(items, min_phrases=2)
+
+# Stricter threshold
+passed, rej = filter_min_phrases(items, min_phrases=3)
+
+# Direct objects only (drops iobj / k4)
+passed, rej = filter_min_phrases(items, object_deprels=["obj", "k2"])
+
+# Historical count-only behaviour
+passed, rej = filter_min_phrases(items, require_core_args=False)
+
+# Independent use on raw sentences
+passed, rej = filter_min_phrases(sentences)
+```
+
+---
+
+#### Chaining individual filters
+
+You can compose any subset of filters manually. The output of each filter is a
+valid input for the next.
+
+```python
+from stanza_parser import load_input
+from filtering import (
+    filter_questions, filter_negatives, filter_ghost_ids,
+    filter_non_projective, filter_bad_root,
+    filter_punct_constituents, filter_min_phrases,
+)
+import pandas as pd
+
+sentences = load_input("corpus.conllu")
+
+p1, r1 = filter_questions(sentences)
+p2, r2 = filter_negatives(p1)
+p3, r3 = filter_ghost_ids(p2)
+p4, r4 = filter_non_projective(p3)
+p5, r5 = filter_bad_root(p4, allowed_pos=["VERB", "AUX", "NOUN", "ADJ"])
+p6, r6 = filter_punct_constituents(p5)
+passed, r7 = filter_min_phrases(p6, min_phrases=2)
+
+all_rejected = pd.concat([r1, r2, r3, r4, r5, r6, r7], ignore_index=True)
+```
+
+---
+
+### `generate_variants(passed_list, valid_deprel_pairs=None, max_variants=99, seed=42, output_dir=None)`
+
+For each sentence, generates permutations of its preverbal constituents and
+pairs them with the corpus (reference) order. **Surface only** — it produces the
+sentence pairs and the ML pairing label, but computes **no features**. Feature
+extraction (dependency length, information status, …) lives in the `scoring`
+package.
+
+#### How variants are generated
+
+1. The preverbal constituents are taken from `passed_list` (already computed by `filter_sentences` or the individual filter chain).
+2. All permutations of those constituents are enumerated (or sampled for long sentences).
+3. Each permutation is checked against `valid_deprel_pairs` — only permutations where every adjacent dependency-relation pair has been observed in the corpus are kept.
+4. Up to `max_variants` valid permutations are selected per sentence.
+5. Each (reference, variant) pair is emitted as one row with an alternating `ML_Label` — the *flip signal*: `1` = presented reference-first, `0` = flipped (variant-first). This guarantees an exactly balanced 50/50 split and is what every feature scorer later uses to orient its diff.
+
+#### Grammar filter (`valid_deprel_pairs`)
+
+The filter keeps only permutations that produce plausible adjacent deprel bigrams.
+- If `None` (default): the set is built from all deprel adjacencies observed across `passed_list`.
+- Pass a custom set to restrict or relax the filter, e.g. from a larger external corpus.
+
+> **Cross-corpus warning:** The `valid_deprel_pairs` built from one corpus is
+> incompatible with sentences from another if their annotation schemes differ
+> (e.g. Paninian `k1/k2/vmod` vs UD `nsubj/obj/obl` have zero overlap). Never
+> mix sentences from differently annotated corpora in one `generate_variants`
+> call.
+
+#### Permutation strategy
+
+| Condition | Strategy |
+|---|---|
+| N! ≤ 100,000 | Exhaustive enumeration |
+| N! > 100,000 | Random sampling (up to 500 valid permutations, 100,000 attempts) |
+
+#### Returns
+
+A single `pandas.DataFrame` (`pairs_df`) with exactly these columns:
+
+| Column | Description |
+|---|---|
+| `Sent_ID` | Sentence identifier from CoNLL-U metadata |
+| `Variant_ID` | `{Sent_ID}_v{n}` |
+| `Ref_Index` | The reference's 1-based position in the submitted file (from `load_input`'s `hnt_index`; 1..n over `passed_list` when the sentences were never stamped) — **the** per-reference key |
+| `Variant_No` | `n` as an integer, 1..n within the reference |
+| `ML_Label` | Flip signal: `1` = reference-first, `0` = flipped (variant-first); balanced 50/50 |
+| `Reference_Sentence` | Reference surface text |
+| `Variant_Sentence` | Variant surface text |
+
+Sorting by `(Ref_Index, Variant_No)` reproduces the submitted file's order (rows
+are emitted that way already). Use those two integers — not `Sent_ID` /
+`Variant_ID` — to group or sort: the IDs are text (`s10` sorts before `s2`), fall
+back to `"Unknown_ID"` without metadata, and an uploaded `.conllu` may repeat
+them. Added 2026-10-04; tables written before then lack both columns, and every
+consumer falls back to `Sent_ID` for them.
+
+Feature columns (`DL_Reference`, `DL_Variant`, `Delta_DL`, `IS_*`, …) are added
+later by scorers — see the scoring section below. The web app also joins the
+word-order construction labels (`Reference_Word_Order` / `Variant_Word_Order`,
+see `label_word_orders` next) right after generation, and appends the
+recommended word order (`Recommended_Sentence` / `Recommended_Is_Reference` /
+`Recommended_Score`) to `variants.csv` when scorers run — see `recommend_column`.
+
+**File saved** (when `output_dir` is given)
+- `reference_variant_pairs.csv`
+
+```python
+pairs_df = generate_variants(passed, output_dir="output/")
+```
+
+---
+
+### `label_word_orders(pairs_df, passed)`
+
+Labels both sides of every pair with the word-order **construction** of
+Ranjan & van Schijndel (2024), Table 1, and returns a two-column DataFrame
+aligned to `pairs_df.index`, ready to `join`:
+
+```python
+from variants import generate_variants, label_word_orders
+
+pairs_df = generate_variants(passed)
+pairs_df = pairs_df.join(label_word_orders(pairs_df, passed))
+```
+
+| Column | Values | Description |
+|---|---|---|
+| `Reference_Word_Order` | `SOV` / `DOSV` / `IOSV` | Construction of the corpus reference |
+| `Variant_Word_Order` | `SOV` / `DOSV` / `IOSV` | Construction of the reordered variant |
+
+- `SOV` — canonical: the subject precedes every object.
+- `DOSV` — a **direct object** precedes the subject.
+- `IOSV` — an **indirect object** precedes the subject, and no direct object does.
+- **`OSV` (object-fronted) is never stored — it is `DOSV` *or* `IOSV`.** The
+  paper's own Table 1 shows OSV as the union of the two (233 ≈ 133 + 101), and
+  when both objects are fronted the label is `DOSV` (the direct-object test
+  runs first). Filter on `label in {"DOSV", "IOSV"}` or `helpers.is_osv`.
+
+The rule (`helpers.classify_word_order`) reads the preverbal constituents'
+root-attached deprels in surface order, unions both annotation schemes with the
+same sets filter 7 uses (subject `nsubj` / `nsubj:pass` / `k1`; direct object
+`obj` / `k2`; indirect object `iobj` / `k4`), and compares the *first*
+constituent of each role. The reference's order comes straight from the parse;
+the variant's is recovered from its surface with `helpers.recover_permutation`
+(the same block-matching every positional scorer relies on). A clause with an
+object but no preverbal subject counts as object-fronted (reachable only with
+`require_core_args=False`); one with no object at all is `SOV`. Unknown
+`Sent_ID`s get empty strings.
+
+These columns are **metadata, not features**: no scorer reads them and the
+central diff step ignores them. `generate_variants` itself stays surface-only.
+Measured on the bundled corpora (2026-09-12): Paninian 1,726 passed → SOV
+1,480 / DOSV 178 / IOSV 68; UD-HDTB 2,298 passed → SOV 2,053 / DOSV 155 /
+IOSV 90 (the paper reports 11.67% OSV; these give 14.3% / 10.7%).
+
+---
+
+### `summarize(passed_list, rejected_df)`
+
+Returns a dict of filter statistics and corpus-level numbers. Works with the
+output of `filter_sentences` or any manually concatenated rejection DataFrame.
+
+```python
+summary = summarize(passed, rejected_df)
+```
+
+**Keys**
+
+| Key | Type | Description |
+|---|---|---|
+| `total_input` | int | Total sentences fed into the first filter |
+| `total_passed` | int | Sentences that cleared all filters |
+| `total_rejected` | int | Sentences rejected by any filter |
+| `pass_rate` | float | `total_passed / total_input` |
+| `rejection_counts` | dict | `{reason: count}` for every rejection reason string |
+| `filter_order` | list | `[{filter, rejected}, …]` — one entry per filter stage in pipeline order (7 entries total) |
+| `avg_sentence_length` | float | Mean token count of passed sentences |
+| `avg_constituent_count` | float | Mean preverbal constituent count of passed sentences |
+| `constituent_count_distribution` | dict | `{n_constituents: sentence_count}` |
+| `word_order_distribution` | dict | `{"SOV": n, "DOSV": n, "IOSV": n}` — construction of each passed reference (see `label_word_orders`); all three keys always present, summing to `total_passed`. OSV = DOSV + IOSV. |
+
+The `filter_order` list groups all `"Non-verbal root: …"` variants under a single
+`"Non-verbal root"` entry so each stage is represented exactly once regardless of how
+many distinct POS tags triggered it.
+
+---
+
+## Corpus compatibility notes
+
+### Paninian-annotated corpora (e.g. ISCNLP, HDTB-Paninian)
+
+Works out of the box with default parameters. The default `allowed_root_pos`
+(`VERB / AUX / VM / VAUX`) covers all verbal roots in Paninian annotation.
+
+### UD-annotated corpora (e.g. UD Hindi-HDTB)
+
+Two adjustments are typically needed:
+
+1. **`allowed_root_pos`** — UD marks copular predicates (adjective/noun) as
+   the syntactic root, so copular clauses have no verbal root and are rejected
+   by the default. This is usually what you want: Ranjan & van Schijndel (2024)
+   require *"the root node for each tree is a finite verb"*, and permuting the
+   dependents of a nominal root is not the preverbal-ordering construct. The
+   **web app's `ud` preset is accordingly `["VERB", "AUX"]`** (verb-only; it
+   allowed `NOUN`/`ADJ`/`PROPN` before 2026-08-03 — on UD-HDTB that admitted
+   1,546 of 13,306 trees). If copular sentences *are* relevant to your study,
+   the library still lets you opt in: pass
+   `allowed_root_pos=["VERB", "AUX", "NOUN", "ADJ", "PROPN"]` to
+   `filter_sentences` or `filter_bad_root`.
+
+2. **`filter_punct_constituents`** fires on UD corpora where discourse
+   connectors are followed by a comma that is separately attached to the root
+   (`"लेकिन,"`, `"बहरहाल,"`, etc.). The filter removes these automatically —
+   no configuration needed.
+
+The `check_pos` signal in `filter_negatives` (which looks for a `NEG` POS tag)
+is a no-op on UD corpora; all negation is correctly caught by `check_features`
+(`Polarity=Neg`). Leave both signals enabled.
+
+---
+
+## Notes
+
+- **Stanza model**: downloaded automatically to `~/stanza_resources/` on first use of `.txt` or raw-string input. Subsequent calls use the cached pipeline.
+- **Identical pairs**: a tiny fraction of (reference, variant) pairs may have identical surface text when a sentence contains reduplicated words as separate constituents (e.g. "हंसते हंसते"). This is expected and has no effect on training.
+- **Features live in `scoring`**: `generate_variants` emits only surface pairs + `ML_Label`. Run the `dependency_length` / `information_status` scorers (or your own) to add feature columns; their diffs (`Delta_DL`, `Delta_IS`, …) are computed centrally from `ML_Label`.
+- **Reproducibility**: set `seed` in `generate_variants()` to control random permutation sampling.
+- **Deprel scheme mismatch**: Paninian (`k1`, `k2`, `vmod` …) and UD (`nsubj`, `obj`, `obl` …) deprel labels have zero overlap. Do not mix sentences from corpora with different annotation schemes in a single `generate_variants` call.
+
+---
+
+## Web app
+
+A small FastAPI front end in `webapp/` runs the full pipeline in the browser.
+It only *imports* the logic packages — no NLP code lives in `webapp/`.
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
+```
+
+Open `http://localhost:8000` (interactive API docs at `/docs`). A hand-written
+guide to the pipeline, scores, and Delta/evaluation/recommendation semantics is
+served at `/how-it-works` — intentionally not linked from the UI, and static
+(update `webapp/static/how-it-works.html` by hand when behavior changes).
+
+- **Input** (two modes, toggled on the page; **Sentence** is the default):
+  - *Sentence* — type **one** Hindi sentence into the text box (parsed with
+    Stanza), plus an optional **context sentence** (the preceding sentence).
+    Typed input is always UD (the scheme select is locked to UD) and runs with
+    the grammar filter **off**, so the single sentence still produces variants.
+    The context sentence is parsed and placed before the target in the scoring
+    corpus so context-aware scorers (`adaptive_lstm_wiki50m`, `information_status`) can
+    use it; **when no context sentence is given, those scorers are skipped**.
+    After the run, the target sentence's **dependency tree** (from the Stanza
+    parse) and **constituency tree** (from the Berkeley parser via `/taru/parse`)
+    render inline, each with an expand control. The first typed run downloads the
+    Stanza Hindi model (slow once). Sentence mode also picks the **most natural
+    word order** among the typed sentence and its variants and shows it in a
+    *Recommended word order* card (see the Recommendation section below) —
+    unless *Recommend a word order* is unticked.
+  - *File* — one `.conllu` or `.txt` upload (`.txt` = one Hindi sentence per
+    line, also parsed with Stanza). Uses the selected scheme and the grammar
+    filter **on** (see below).
+- **Options**: max variants per sentence, annotation scheme preset (Paninian /
+  UD root POS, File mode only), which cognitive scorers to run (the six
+  **active** ones — see *Active vs. library-only scorers* below), and one
+  mode-specific checkbox each — File mode's **Evaluate predictor accuracy**
+  (pairwise ranking accuracy over the ticked scorers' deltas; see the Evaluation
+  section below) and Sentence mode's **Recommend a word order** (on by default;
+  unticking it skips the ranking entirely, so neither `recommendation.json` nor
+  the `Recommended_*` columns are produced). (Min preverbal phrases is fixed
+  internally at 2.)
+- **Cancelling a run**: while a job is running, *Cancel run* → *Yes, stop it*
+  stops it for good (`POST /api/jobs/{id}/cancel`) and hands the form straight
+  back, so the next job can be submitted immediately. Artifacts already written
+  stay downloadable — a job cancelled during scoring still leaves the surface
+  `variants.csv`. There is no resuming a cancelled job.
+- **Grammar filter**: on for File mode, off for Sentence mode. When on, only
+  reorderings whose adjacent deprel bigrams occur in the corpus are kept (the
+  library's standard behaviour); for small corpora (roughly < 100 sentences)
+  the observed bigram set is usually too sparse to license *any* reordering,
+  which is why typed input turns it off.
+- **Downloads per stage** (available as soon as each stage finishes):
+  `parsed.conllu` (only for `.txt` input), `passed_sentences.csv`,
+  `rejected_sentences.csv`, `summary.json` (filter counts plus the
+  `word_order_distribution` of the passed references, shown as SOV / OSV tiles
+  on the filter card), `variants.csv`
+  (reference/variant pairs with `Sent_ID`/`Variant_ID`, the
+  `Reference_Word_Order` / `Variant_Word_Order` construction labels, then
+  scorer columns and, when scorers run, the `Recommended_*` word-order
+  columns),
+  `evaluation.json` (only when *Evaluate predictor accuracy* was ticked), and
+  `recommendation.json` (Sentence mode, unless the recommendation was unticked —
+  the recommended word order and the full candidate ranking).
+- Jobs run on a 2-worker queue; results expire after one hour. A queued or
+  running job can be cancelled (see *Cancelling a run* above).
+- **Request limits** (`webapp/ratelimit.py`): the expensive endpoints are
+  metered per caller, on two tiers at once — a *session* key
+  (`sha256(ip + first-party cookie)`, so a lab behind one NAT address is not one
+  shared budget) and the *IP* alone, which a cookie reset cannot escape. A
+  request needs room in both. Per 60 s: `POST /api/jobs` 2 session / 10 IP,
+  `POST /taru/parse` 6 / 20, `POST /taru/train` 2 / 5. Independently, a caller
+  may hold **1 job in flight** (3 per IP) — the cap that actually protects the
+  2-worker pool, since a single run can occupy a worker for many minutes;
+  cancelling frees the slot at once. Over-limit requests get **429** with
+  `Retry-After` and a plain-English `detail` that the UI shows verbatim.
+  Cheap reads are deliberately **never** limited — above all
+  `GET /api/jobs/{job_id}`, which the page polls every 1.5 s for the whole life
+  of a job. Limits are module constants; `HNT_NO_RATELIMIT=1` switches the whole
+  thing off for local dev and test runs. `HNT_TRUSTED_PROXY=1` takes the client
+  address from the **last** `X-Forwarded-For` hop instead of the socket — set it
+  only when a proxy you control terminates traffic, since the header is
+  otherwise attacker-supplied.
+- **Upload limits**: `.txt` / `.conllu` only, **250 MB** max
+  (`HNT_MAX_UPLOAD_BYTES` overrides it without a rebuild), and typed sentences
+  are capped at 2,000 characters. The body is streamed to disk in 1 MB chunks
+  and aborted the moment the running total passes the cap, so an oversized or
+  mis-declared upload is never held in memory; a `Content-Length` that is
+  already too large is refused up front by a small ASGI middleware, before
+  anything reads the body.
+- **Startup pre-warm**: the server loads the heavy models (Stanza, then the
+  trigram model, then the Wikipedia-50M LSTM plus one throwaway adaptation
+  step) on a background thread at startup, so
+  the first job is fast; a job submitted while warming is still correct — it
+  simply loads whatever it needs itself. Set `HNT_NO_PREWARM=1` before
+  starting to skip warming (lighter local dev server; the first job then pays
+  the model loading cost, which can be minutes for the trigram scorer).
+
+### Adding a scorer (group members)
+
+Scorers live in the `scoring/` package — you never need to touch the web code.
+Create one file, e.g. `scoring/my_scorer.py`:
+
+```python
+from .base import Scorer
+
+class MyScorer(Scorer):
+    name = "my_scorer"                      # machine name: API + registry key
+    display_name = "My Scorer"              # title shown in the UI
+    description = "One-line description."
+
+    def score(self, pairs_df):
+        df = pairs_df.copy()
+        df["My_Ref_Score"] = ...            # reference-side value (true role)
+        df["My_Var_Score"] = ...            # variant-side value (true role)
+        return df
+
+    def deltas(self):
+        # Diff is computed centrally from ML_Label at the end of the pipeline.
+        return [("Delta_My",
+                 lambda row: row["My_Ref_Score"],
+                 lambda row: row["My_Var_Score"])]
+```
+
+The web app discovers it automatically on restart. `pairs_df` is the
+`generate_variants` output (`Sent_ID | Variant_ID | Ref_Index | Variant_No |
+ML_Label | Reference_Sentence | Variant_Sentence`); add columns, never drop or
+reorder rows. To work per reference sentence, group with
+`helpers.reference_groups(pairs_df)` (keyed on `Ref_Index`) and find each row's
+parse with `helpers.reference_lookup(pairs_df, passed)` — never key on
+`Sent_ID`, which can repeat. Compute in whatever order suits you, but write
+results back by row position. Emit raw `*_Reference` / `*_Variant` (true-role) scores and declare the
+diff via `deltas()` — don't compute it yourself.
+
+Optionally declare the *direction* of your raw score so the scorer can also
+vote in Sentence-mode word-order recommendations (see the Recommendation
+section):
+
+```python
+    # True = higher raw score marks the more natural order (log-likelihood,
+    # givenness); False = lower does (surprisal, dependency length).
+    higher_is_more_natural = {"Delta_My": False}
+```
+
+See `scoring/example_scorer.py` for a copy-paste template, and
+`scoring/dl_scorer.py` / `scoring/is_scorer.py` for the two built-in scorers.
+
+#### Active vs. library-only scorers (`Scorer.active`)
+
+Every scorer has an `active` flag, `True` by default. Setting `active = False`
+on the class keeps the scorer **in the library** but **out of the web app**:
+
+- `scoring.get_scorers()` and `apply_scorers()` still find and run it — nothing
+  changes for notebooks, scripts, `evaluation.fit_weights` or the test suite.
+- `scoring.get_active_scorers()` leaves it out. The web app uses that subset:
+  `GET /api/plugins` lists only active scorers (so the page shows no checkbox
+  for the rest) and `POST /api/jobs` answers **400** `Scorer(s) not enabled`
+  to a job that names an inactive one.
+
+All five built-in scorers are active: `dependency_length`,
+`information_status`, `trigram`, `adaptive_lstm_wiki50m` and `berkeley_pcfg`.
+Set `active = False` on a scorer you want to keep out of the web app.
+
+#### The central diff step (`deltas` + `ML_Label`)
+
+After all selected scorers run, `apply_scorers` computes each scorer's declared
+deltas from the `ML_Label` flip signal, so **every feature is differenced with
+the same orientation**:
+
+```
+Delta_<name> = ref - var   if ML_Label == 1   (reference presented first)
+Delta_<name> = var - ref   if ML_Label == 0   (flipped, variant first)
+```
+
+This is why scorers store true-role `*_Reference` / `*_Variant` values and only
+*declare* their diff: as features are added one by one, their deltas are all
+produced consistently in one place.
+
+#### Scorers that need corpus context
+
+`pairs_df` carries only surface strings (the generator computes no features). A
+scorer that needs more — the dependency parse, or the **preceding sentence** —
+can declare an optional `context` parameter on `score`. `apply_scorers` inspects
+the signature and passes `context` only to scorers that ask for it, so
+single-argument scorers keep working unchanged:
+
+```python
+def score(self, pairs_df, context=None):
+    corpus = context["corpus"]          # helpers.CorpusContext
+    passed = context["passed"]          # filter output (parse / constituents)
+    scheme = context["scheme"]          # "ud" or "paninian"
+    ...
+```
+
+The pipeline builds this read-only dict per job. Treat it as read-only — for
+the web app it is shared across rows and concurrent jobs. `context` is passed
+as a call argument (never stored on the shared scorer instance), so it is
+thread-safe.
+
+The two recurring building blocks a scorer needs — the **preceding sentence**
+and the **variant's reconstructed tree** — live in the `helpers` package (see
+below), so you rarely write either from scratch.
+
+## Helpers (`helpers/`)
+
+Shared, scorer-agnostic primitives. Depends only on `conllu`, so any logic
+package may import it.
+
+### Preceding-sentence lookup
+
+`helpers.CorpusContext` indexes the full, pre-filter corpus by `sent_id` so any
+scorer can fetch the sentences before a given one — the generic solution to the
+"context sentence" problem.
+
+```python
+from helpers import build_corpus_context, get_previous_sentences
+
+# Repeated lookups — build the index once:
+ctx = build_corpus_context(all_sentences)   # all_sentences from load_input()
+ctx.previous("doc_s42", n=1)                  # -> List[TokenList] (oldest first)
+ctx.previous_text("doc_s42", n=2)             # -> str (concatenated surface)
+ctx.previous("doc_s42", n=1, ref_index=42)    # by file position (Ref_Index)
+
+# One-off lookup — no index to manage:
+get_previous_sentences(all_sentences, "doc_s42", n=1)   # -> List[TokenList]
+```
+
+(`build_corpus_context` / `CorpusContext` are also re-exported from `scoring`
+for backward compatibility.) Build from the **complete** corpus in load order
+(before filtering) so a sentence dropped by the filters still counts as the
+textual predecessor of the next one — the web app does exactly this, so in File
+mode a reference's context is the line before it in your upload even when the
+filters rejected that line. Context never crosses a document boundary: a
+sentence carrying a CoNLL-U `# newdoc` / `# newdoc id = …` comment starts a new
+document, and `previous(n=…)` stops at the start of the sentence's own document.
+Returns `[]` at the start of the corpus or of a document, or for an unknown
+`sent_id`. A `sent_id` alone resolves a duplicated id to its
+*first* occurrence; pass `ref_index` (the row's `Ref_Index`) and the sentence is
+found by its unique file position instead, with the `sent_id` kept as a
+cross-check.
+
+### Reference grouping (`helpers/grouping.py`)
+
+Every sentence is stamped with its position in the submitted file as it is
+loaded, and that position is the key for everything done *per reference
+sentence* — batching, caching the reference's score, one adaptation step, the
+recommendation, the word-order label:
+
+```python
+from helpers import reference_groups, reference_lookup
+
+for key, positions in reference_groups(pairs_df):   # key = Ref_Index
+    ...                                              # positions = iloc row positions
+parses = reference_lookup(pairs_df, passed)          # row -> filter-output item (or None)
+```
+
+`reference_groups` returns groups in first-appearance order with 0-based row
+positions, so a scorer can compute in any order and write back by position.
+Both helpers fall back to `Sent_ID` (plus the reference text, for grouping) on a
+table that has no `Ref_Index` column. `stamp_ref_index(sentences, start=1)`
+stamps hand-built TokenLists; the web app stamps a Sentence-mode context
+sentence at `<= 0` so it never collides with the target's `1`.
+
+### Variant reconstruction
+
+A variant is stored only as a surface string — there is no CoNLL-U for it.
+`helpers.rebuild_variant_tree` rebuilds its reordered, re-indexed dependency
+tree from the reference parse + the variant surface string, so any scorer that
+measures something positional on a variant (dependency length, …) can reuse it:
+
+```python
+from helpers import rebuild_variant_tree
+
+vt = rebuild_variant_tree(reference_sentence, constituents, root_id, variant_sentence)
+vt.tokens          # reordered, re-indexed token dicts (the "variant CoNLL-U")
+vt.root_id         # new root id after re-indexing
+vt.constituents    # variant constituents, re-grouped (lengths preserved)
+```
+
+It inherits the relations from the reference parse and only renumbers token IDs
+and the head pointers that reference them (the variant is a re-ordering of the
+same words). Lower-level pieces are also exported: `recover_permutation`,
+`reindex_tokens`, `block_start_index`. Pass `perm=` to skip block-matching when
+the constituent order is already known.
+
+### Word-order classification (`helpers/word_order.py`)
+
+The construction rule behind `variants.label_word_orders` and
+`summarize()["word_order_distribution"]`, usable on any deprel sequence:
+
+```python
+from helpers import classify_word_order, constituent_deprel, is_osv
+
+deprels = [constituent_deprel(c, root_id) for c in constituents]   # surface order
+classify_word_order(deprels)      # 'SOV' | 'DOSV' | 'IOSV'
+is_osv(label)                     # True for DOSV and IOSV (the paper's OSV class)
+```
+
+`DOSV` if a direct object (`obj` / `k2`) precedes the subject (`nsubj` /
+`nsubj:pass` / `k1`); else `IOSV` if an indirect object (`iobj` / `k4`) does;
+else `SOV`. The relation sets are exported (`SUBJECT_DEPRELS`,
+`DIRECT_OBJECT_DEPRELS`, `INDIRECT_OBJECT_DEPRELS`), as are `WORD_ORDER_LABELS`
+and `OSV_LABELS`.
+
+### Cancellation (`helpers/cancellation.py`)
+
+How the web app stops a running job. Python threads cannot be killed, so a run
+is stopped by agreement: long loops call `heartbeat()`, and once the job's token
+is cancelled the next heartbeat raises `JobCancelled`, unwinding the pipeline.
+Artifacts already written stay on disk.
+
+```python
+from helpers import heartbeat, register_process
+
+for sentence in sentences:      # in any scorer / long loop
+    heartbeat()                 # no-op outside the web app
+    ...
+
+with subprocess.Popen(...) as proc, register_process(proc):
+    out, err = proc.communicate(timeout=300)   # killed if the job is cancelled
+```
+
+- **The killer** — `CancelToken.cancel()`. Flips the token *and* terminates
+  every registered child process, which is the one thing a cooperative flag
+  cannot interrupt (the Berkeley JVM is one blocking call for a whole batch).
+- **The heartbeat** — `heartbeat()`. Records liveness (surfaced as `last_beat`
+  on the job status) and raises once cancelled. Cheap enough to call per row.
+- The token is bound to the worker **thread** (`bind`/`unbind`, used by
+  `webapp/jobs.py`), so scorers need no extra argument. Nothing binds a token
+  outside the web app, which is why both calls are no-ops for library, notebook
+  and test-suite callers.
+
+Where the heartbeats are: every stage boundary in `webapp/pipeline.py`, between
+scorers in `apply_scorers`, and per batch or sentence in the slow scorers (`trigram`,
+`adaptive_lstm_wiki50m`). Single opaque calls — the Stanza parse,
+`filter_sentences`, `generate_variants` — have no per-item hook, so a cancel
+issued during one takes effect when it returns.
+
+### Built-in scorer: `dependency_length`
+
+- **Trained on:** Not trained (deterministic)
+- **Built with:** Dependency-length minimization, per-arc length = arc_length − 1
+
+The dependency-length feature scorer (dependency-length-minimization, after
+Gildea & Jaeger 2015). It reconstructs each variant's reordered, re-indexed
+dependency tree (from the reference parse in `context["passed"]` plus the
+variant surface string) and measures the total dependency length of both orders:
+the sum of `arc_length − 1` over every non-root dependency arc.
+
+Columns added to `variants.csv`:
+
+| Column | Description |
+|---|---|
+| `DL_Reference` | Total dependency length of the reference order (true role) |
+| `DL_Variant` | Total dependency length of the variant order (true role) |
+| `Delta_DL` | The `ML_Label`-oriented difference of the two (computed by the central diff step) |
+
+Needs `context["passed"]` (the filter output). Without it both columns are
+emitted as `0`.
+
+### Built-in scorer: `information_status`
+
+- **Trained on:** Not trained (deterministic)
+- **Built with:** Given/new heuristic over the parse
+- **Requires:** a context sentence
+
+Information Status (IS) / givenness, after Ranjan & van Schijndel (2024). For
+each pair it scores whether the **given** phrase (already mentioned in the
+previous sentence, or a pronoun) precedes the **new** phrase, comparing the
+**subject** and **object** of the clause:
+
+| Order | Score |
+|---|---|
+| Given → New | `+1` |
+| New → Given | `-1` |
+| Given → Given / New → New | `0` |
+
+Columns added to `variants.csv`:
+
+| Column | Description |
+|---|---|
+| `IS_Reference` | IS score of the reference order (true role) |
+| `IS_Variant` | IS score of the variant order (true role) |
+| `Delta_IS` | Advantage produced by the central diff step: `ML_Label`-oriented difference of the IS scores. On reference-first rows this is `IS_Reference − IS_Variant` (positive = reference adheres to given-before-new, paper footnote 6); on the balanced 50% of flipped rows the sign is reversed. |
+
+A phrase is **GIVEN** if its head is a pronoun, or if any of its content-word
+lemmas appear among the previous sentence's content-word lemmas (lemma-vs-lemma
+overlap — more robust for inflected Hindi than the original lemma-vs-surface
+comparison, so exact scores differ from the reference paper's CSV by design).
+Pairs where a subject or object cannot be identified score `0`.
+
+**Annotation scheme** (`context["scheme"]`) selects the relation/POS sets:
+
+| | UD | Paninian |
+|---|---|---|
+| subject rels | `nsubj`, `csubj` | `k1` |
+| object rels | `obj`, `iobj` | `k2`, `k4` |
+| pronoun POS | `PRON` | `PRP`, `PR` |
+| content POS | `NOUN PROPN VERB ADJ ADV NUM` | `NN NNC NNP NNPC VM JJ RB QC QCC` |
+
+> **Conversion note:** raw-string / `.txt` input is parsed by Stanza, which
+> emits **UD** annotation — choose the UD scheme for it. The Paninian scheme is
+> meaningful only for pre-annotated Paninian `.conllu` uploads (e.g. the
+> bundled ISCNLP corpus). In the web app the scheme is chosen by the
+> "Annotation scheme" selector, which also drives root-POS handling.
+
+Library usage:
+
+```python
+from stanza_parser import load_input
+from filtering import filter_sentences
+from variants import generate_variants
+from scoring import apply_scorers, build_corpus_context
+
+sentences = load_input("data/fact_media_news_ISCNLP.conllu")
+passed, _, _ = filter_sentences(sentences)
+pairs_df = generate_variants(passed)
+
+pairs_df = apply_scorers(
+    pairs_df,
+    ["dependency_length", "information_status"],
+    context={
+        "corpus": build_corpus_context(sentences),
+        "passed": passed,
+        "scheme": "paninian",
+    },
+)
+```
+
+### Built-in scorer: `trigram`
+
+- **Trained on:** 1M Hindi Wikipedia sentences (dumps.wikimedia.org/hiwiki), 30k vocabulary
+- **Built with:** Katz backoff over Good-Turing discounted counts
+- **Notes:** surprisal in bits; memory-mapped, so it loads instantly
+
+Trigram language-model surprisal (Ranjan & van Schijndel 2024), from a
+Katz-backoff model stored as ten memory-mapped files in
+`scoring/models/trigram_katz/` (~148 MB, loads in ~0.05 s). For each order it
+sums per-position surprisal `−log₂ P(w₃ | w₁, w₂)` over the whole sentence.
+
+**Scoring.** The sentence is padded with `<s> <s>` and scored through `</s>`, so
+every word contributes — including the first two. The input first goes through
+the model's training-time cleaning
+(`scoring/_katz_trigram.py:normalize`), which is not optional: the training
+corpus was split on `[।!?]`, so a sentence-final danda never appeared in
+training and must be stripped rather than fed through as an unknown word.
+
+**Smoothing.** Katz backoff with data-derived backoff weights over Good-Turing
+discounted counts — a genuine probability distribution, so an unseen trigram
+falls back to the bigram and then the unigram.
+
+Columns added to `variants.csv`:
+
+| Column | Description |
+|---|---|
+| `Trigram_Reference` | Total trigram surprisal (bits) of the reference order |
+| `Trigram_Variant` | Total trigram surprisal (bits) of the variant order |
+| `Delta_Trigram` | Advantage: the `ML_Label`-oriented difference (central diff step) |
+
+**This scorer was replaced on 2026-08-29**, and the change is worth knowing
+about if you are comparing against older runs. The previous implementation was
+a pickled NLTK MLE model (`scoring/models/trigram.pkl`, 226 MB) that started
+its loop at the third word: it never padded with `<s>`, never scored `</s>`,
+and so skipped **11.1%** of a sentence's surprisal — concentrated at the
+sentence start, exactly where preverbal reordering moves material. On the app's
+own 48,864 Paninian pairs, ranking accuracy went **70.31% → 82.16%**; on the
+research corpus's 92,299 pairs, **77.09% → 89.52%**. Almost all of that is the
+scoring function rather than the model: the old pickle scored the new way
+reaches 82.14%, statistically indistinguishable from the new model's 82.16%.
+
+⚠ Two consequences. **Units changed from nats to bits**, so `Trigram_*` values
+in a `variants.csv` produced before that date are not comparable in magnitude
+with a newer one (ranking accuracy is invariant to the rescaling, so accuracy
+figures are). And `Delta_Trigram`'s recommender weight was refit on the same
+92,299 pairs, **1.8816 → 4.9497**.
+
+### Built-in scorer: `adaptive_lstm_wiki50m`
+
+- **Trained on:** 50.8M tokens of Hindi Wikipedia (dumps.wikimedia.org/hiwiki), 30k vocabulary
+- **Built with:** 2-layer LSTM + one-step online adaptation
+- **Notes:** surprisal in nats
+- **Requires:** a context sentence
+
+A 2-layer LSTM language model trained on 50.8M tokens of Hindi Wikipedia
+(`training/lstm/`), with one-step online adaptation (van Schijndel & Linzen
+2018): for each reference it starts from pristine base weights, takes one SGD
+step on the preceding sentence, then scores the reference and its variants.
+Sentences are cleaned exactly as the training text was (`_lstm_wiki50m.normalize`)
+and framed as `<SOS> … <EOS>`, so every word and the sentence end are scored.
+Requires a context sentence (`needs_previous_sentence = True`); with none it
+scores with the unadapted model.
+
+Columns added to `variants.csv`:
+
+| Column | Description |
+|---|---|
+| `AdaptiveWiki50M_Reference` | Total adapted surprisal (nats) of the reference order |
+| `AdaptiveWiki50M_Variant` | Total adapted surprisal (nats) of the variant order |
+| `Delta_AdaptiveWiki50M` | Advantage: the `ML_Label`-oriented difference (central diff step) |
+
+It is **deterministic**: the dropout probability is zeroed for the adaptation
+step, which costs nothing measurable, so two runs of the same job agree exactly.
+
+### How the LSTM scorer computes (`scoring/_lstm_engine.py`)
+
+`adaptive_lstm_wiki50m` scores through a batched engine. The scorer only
+encodes its sentences; the engine then:
+
+1. groups the rows by reference (`helpers.reference_groups`) and scores each
+   reference **together with its variants** — the reference is computed once
+   and broadcast to every row of its group;
+2. sorts the group's sentences by token ids, so variants that share a prefix sit
+   together, and runs the LSTM over them in chunks — variants are permutations
+   of the same words, so a chunk needs no padding;
+3. **prefix cache:** gives every distinct token prefix one node and runs the
+   vocabulary projection + `log_softmax` (the dominant cost — a 30k-word output
+   at every position) once per node rather than once per position. Same
+   arithmetic, fewer rows;
+4. writes each result back to its row position — the table is never reordered.
+
+Results equal the original one-sentence-at-a-time loop to float32 rounding
+(≤ 1e-4 nats on sentence totals of ~100–200 nats), with the cache on or off and
+at any batch size. The scorer adapts once per group with dropout off, and
+skips the copy and the step entirely when there is no preceding sentence. The adaptation step
+itself (`_lstm_engine.sgd_step`) is plain SGD with a **sparse embedding
+update**: one step only changes the embedding rows of the context sentence's
+words (~20 of 30k), so only those rows are written, and the working copy is
+reset afterwards by restoring just the dense layers plus those rows. Same
+update as `torch.optim.SGD` (weights agree to ~2e-7; scores identical), at
+~34 ms per sentence instead of ~55 ms.
+
+Settings (environment variables, read at run time — tune a bigger box without a
+rebuild):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `HNT_LSTM_BATCH` | `16` | Sentences per LSTM chunk (16 measured fastest on a 4-thread CPU; 128 was slower) |
+| `HNT_LSTM_PREFIX_CACHE` | on | `0` disables the prefix cache (for comparison; results are the same) |
+| `HNT_TORCH_THREADS` | torch default | torch intra-op threads, applied once when an LSTM model loads |
+
+### Built-in scorer: `berkeley_pcfg`
+
+- **Trained on:** HDTB — 13,282 DS-PS constituency trees (`training/pcfg/`)
+- **Built with:** Berkeley Parser, DS-PS grammar
+- **Notes:** surprisal in nats — lower = easier to process
+
+Berkeley **DS-PS** PCFG *whole-sentence surprisal*, scored with the Berkeley
+Parser (`-sentence_likelihood`) on the HDTB DS-PS grammar
+(`scoring/models/hdtb_dsps_grammar`), reusing the jar already bundled for the
+Taru tool (`taru/external_resources/berkeleyparser/berkeleyParser.jar`). One
+batched JVM call scores all unique surfaces in the table.
+
+> **Units.** Surprisal is exactly `−log P`, so the parser's log-likelihood is
+> **negated on the way in** and the stored value is a surprisal in nats (lower =
+> more probable under the grammar).
+>
+> The `-inf` guard for unparseable sentences is applied to the **raw**
+> log-likelihood, before negation.
+
+Requires **Java** on `PATH` (present in the Docker image). If the jar/grammar is
+missing, Java is unavailable, or a sentence is unparseable, that score is `NaN`.
+All unique sentences are parsed in **one** Java call with a wall-clock limit of
+**1800 s** (`HNT_PCFG_TIMEOUT` overrides it, in seconds; raised from 300 s on
+2026-10-04 — a 2,000-sentence upload took ~250–295 s). If the limit is hit the
+whole column is `NaN`, and a File-mode job with *Evaluate* on then fails, so keep
+web uploads modest (a few thousand sentences). Cancel still stops the parser
+immediately.
+
+| Column | Description |
+|---|---|
+| `PCFG_Reference` | Whole-sentence surprisal (nats) of the reference order |
+| `PCFG_Variant` | Whole-sentence surprisal (nats) of the variant order |
+| `Delta_PCFG` | Advantage: the `ML_Label`-oriented difference |
+
+> **Model artifacts.** `trigram` and `adaptive_lstm_wiki50m` load large files
+> from `scoring/models/` (`trigram_katz/` 148 MB across ten memory-mapped files,
+> `base_model_wiki50m.pt` 65 MB, `vocab.pkl`); `berkeley_pcfg` needs
+> `hdtb_dsps_grammar` (1.7 MB). They are not in git — build them with
+> `training/` (`training/README.md`) — and are baked into the Docker image. All loading is deferred to first use,
+> so plugin discovery and the rest of the pipeline are unaffected when a scorer
+> is not selected.
+
+## Recommendation (`scoring/recommend.py`)
+
+Picks the **most natural word order** among a sentence's candidates — the
+reference plus every generated variant — from the raw true-role scores the
+selected scorers already computed. This powers the web app's *Recommended word
+order* card (Sentence mode).
+
+### `recommend_order(pairs_df, names)`
+
+```python
+from scoring import recommend_order
+
+result = recommend_order(scored_df, ["dependency_length", "lstm"])
+```
+
+| Parameter | Description |
+|---|---|
+| `pairs_df` | the scored pairs table (`generate_variants` + `apply_scorers` output) |
+| `names` | scorer names whose features should vote (same list given to `apply_scorers`); unknown names raise `KeyError` |
+
+How it ranks (per `Sent_ID`):
+
+1. Each scorer's `deltas()` extractors read the raw reference/variant scores
+   straight off the table — nothing is recomputed.
+2. Only deltas with a declared direction (`Scorer.higher_is_more_natural`) vote;
+   scorers without the declaration are simply skipped.
+3. Per feature, candidate scores are z-scored *locally* (across that sentence's
+   candidates) and oriented so higher always means "more natural". A feature
+   with no spread, or fewer than 2 finite values, contributes nothing.
+4. A candidate's combined score is the **weighted mean** of its oriented
+   z-scores. Weights are corpus-trained standardized logistic-regression
+   coefficients (see below); all five built-ins ship a fitted weight, and any
+   feature without one falls back to voting with 1.0.
+5. The top score wins; exact ties go to the reference. Candidates with no
+   usable feature value (e.g. a missing model) score `null`.
+
+Returns a JSON-serializable dict:
+
+```python
+{
+  "features":  [{"delta": "Delta_DL", "scorer": "dependency_length",
+                 "higher_is_more_natural": False, "weight": 0.6377}, ...],
+  "sentences": [{"sent_id": "s1",
+                 "recommended": {"id": "s1_v2", "sentence": "...",
+                                 "is_reference": False, "score": 1.37},
+                 "candidates": [{"id": "reference", "sentence": "...",
+                                 "is_reference": True,
+                                 "values": {"Delta_DL": 10.0, ...},
+                                 "score": -0.39}, ...]}]   # reference first
+}
+```
+
+### `recommend_column(pairs_df, names)`
+
+```python
+from scoring import recommend_column
+
+rec_cols = recommend_column(scored_df, ["dependency_length", "lstm"])
+if rec_cols is not None:
+    scored_df = scored_df.join(rec_cols)
+```
+
+The same per-`Sent_ID` winner as `recommend_order`, but returned as three
+columns aligned to `pairs_df.index` and broadcast across every row of a
+sentence — cheap and bounded on a large corpus (it keeps only the winner per
+group, never the full candidate lists). Powers the recommendation columns the
+web app writes into `variants.csv` (both modes).
+
+| Column | Description |
+|---|---|
+| `Recommended_Sentence` | the most natural surface order (reference text when the original order won, else the winning variant's text) |
+| `Recommended_Is_Reference` | `True` when the reference order was judged most natural |
+| `Recommended_Score` | the winner's combined weighted-z score |
+
+Returns `None` when no named scorer contributes a rankable feature (nothing to
+rank → the caller omits the columns). Rows of a sentence with no scorable
+candidate get blank / `NaN` values.
+
+### Pretrained weights (`scoring/models/recommender_weights.json`)
+
+A model cannot be fit on one sentence's few unlabeled candidates — so the
+feature weights are fitted **offline on a corpus** and fixed. Because the
+pairwise logistic regression in `evaluation/` is linear
+(`P(A over B) = σ(w·(f(A)−f(B)))`), its coefficients rank single candidates
+directly (`s(c) = w·f(c)`, the Joachims pairwise trick). Only the coefficient
+*magnitude* is used; the sign always comes from the scorer's declared
+`higher_is_more_natural`, so a noisy fit can never flip a theory-verified direction.
+
+Regenerate (or extend to more scorers) with:
+
+```powershell
+python -m evaluation.fit_weights                     # DL + IS on UD HDTB (defaults)
+python -m evaluation.fit_weights --scorers dependency_length,information_status,trigram,adaptive_lstm_wiki50m,berkeley_pcfg
+```
+
+⚠ `fit_weights` **overwrites** the file with only the scorers you pass, so
+name all five to keep every weight.
+
+The shipped file carries fitted weights for all five built-in scorers
+(magnitude = each feature's standalone accuracy at ranking the attested order):
+`Delta_AdaptiveWiki50M` 6.067 (92.6%), `Delta_Trigram` 4.950 (89.5%),
+`Delta_PCFG` 0.896 (63.4%), `Delta_DL` 0.638 (61.7%), `Delta_IS` 0.306 (53.1%).
+Provenance is mixed: `Delta_DL` from a full-corpus fit on the committed
+`data/hi_hdtb-ud-train.conllu` (193,474 pairs, made before the verb-only root
+filter, so a refit lands near but not exactly on it); the other four from a
+92,299-pair HDTB feature table of the Ranjan & van Schijndel (2024)
+replication. It is the one file in `scoring/models/` that **is** committed
+(tiny and deterministic). A missing file (or a future scorer with no fitted
+weight) just falls back to weight 1.0.
+
+### In the web app
+
+Sentence mode's *Recommend a word order* checkbox (on by default) writes a
+`recommendation.json` artifact (`status` `"ok"` / `"no_scorers"` / `"no_pairs"`)
+and renders the *Recommended word order* card: the winning order with a badge
+("your original order" vs "reordered variant") and the full candidate table —
+one column per feature (↓/↑ = direction), best first, winner highlighted.
+File mode does not write the JSON/card (use *Evaluate predictor accuracy* there
+instead) but does append the `Recommended_*` columns (via `recommend_column`) to
+`variants.csv` whenever scorers run.
+
+Two options carry this in `webapp/pipeline.py`, so the checkbox means one thing
+to the user and File mode keeps its columns:
+
+| Option | Gates | Sentence mode | File mode |
+|---|---|---|---|
+| `recommend` | `recommend_column` → the `Recommended_*` columns | the checkbox | always `True` |
+| `recommend_json` | `recommendation.json` + the card | the checkbox | always `False` |
+
+## Evaluation (`evaluation/`)
+
+Pairwise ranking evaluation of the scorers' delta features: how often does a
+feature — alone, and all features combined — pick the human-written ordering
+over the reordered variant?
+
+The pairs table from `apply_scorers` is already the balanced pairwise dataset
+of Joachims (2002): `ML_Label` alternates 1/0 and every `Delta_<name>` column
+is oriented *first − second* by the central diff step. Evaluation is therefore
+a direct classification task — predict `ML_Label` from the deltas — and the
+defaults reproduce the study this toolkit derives from (Ranjan & van Schijndel
+2024): 10-fold cross-validation (shuffled, seed 42), z-scoring fit on each
+training fold only, an lbfgs logistic regression, accuracy pooled over the
+out-of-fold predictions. Chance is 50%.
+
+### `evaluate_pairs(pairs_df, deltas=None, folds=10, seed=42, labels=None, group_by_sentence=False)`
+
+```python
+from evaluation import evaluate_pairs
+
+result = evaluate_pairs(pairs_df)                    # every Delta_* column
+result = evaluate_pairs(pairs_df, deltas=["Delta_DL", "Delta_Trigram"])
+```
+
+| Parameter | Description |
+|---|---|
+| `pairs_df` | `apply_scorers` output with `ML_Label` + `Delta_*` columns |
+| `deltas` | delta columns to evaluate; `None` = auto-detect every `Delta_*` |
+| `folds` / `seed` | CV folds and shuffle seed (paper defaults: 10 / 42) |
+| `labels` | optional `{delta_column: display_name}` echoed into the result |
+| `group_by_sentence` | `True` = GroupKFold on `Sent_ID` (stricter: no sentence on both sides of a fold); default `False` matches the paper |
+
+Returns a dict (accuracies as 0–1 fractions):
+
+```python
+{
+  "n_pairs": 3000, "folds": 10, "seed": 42,
+  "predictors": [                      # one per delta, sorted by accuracy desc
+    {"delta": "Delta_DL", "label": "dependency_length", "n": 3000,
+     "accuracy": 0.61, "coefficient": -0.42,
+     "direction": "reference preferred when this value is lower"},
+    ...
+  ],
+  "combined": {                        # all deltas in one model; None if < 2
+    "deltas": [...], "n": ..., "accuracy": ...,
+    "coefficients": {"Delta_DL": -0.40, ...}
+  }
+}
+```
+
+Per predictor, rows with a missing (`NaN`) delta are dropped for that predictor
+only (`n` reports what remained); the combined model uses rows complete across
+all included deltas. Coefficients come from an effectively unregularised fit on
+the full z-scored data; the *sign* is the reliable part — negative means the
+reference is preferred when that feature's value is lower (expected for
+surprisals and dependency length). Raises `ValueError` when `ML_Label`/deltas
+are missing or a predictor has fewer usable rows than folds.
+
+**Confidence intervals are currently switched off.** Each accuracy used to carry
+`ci_low` / `ci_high` from a 95% normal-approximation binomial interval, but that
+formula assumes independent rows and ours are not — one sentence contributes up
+to 99 pairs sharing a reference and a parse, so the reported band came out
+narrower than the truth. The keys are suppressed until the interval is computed
+in a way that respects that clustering. Set `INCLUDE_CI = True` in
+`evaluation/ranking.py` to restore them; every consumer treats the two keys as
+optional, so nothing else needs changing.
+
+**Every scorer that declares `deltas()` is automatically a predictor** — there
+is nothing extra to implement when adding a scorer.
+
+### `evaluate_by_construction(pairs_df, deltas=None, labels=None, min_pairs=1, folds=10, seed=42)`
+
+The same measurement repeated per word-order construction: a canonical `SOV`
+row, then the paper's Table 4.
+Needs the `Reference_Word_Order` / `Variant_Word_Order` columns from
+`variants.label_word_orders`.
+
+```python
+from evaluation import evaluate_by_construction
+
+for entry in evaluate_by_construction(pairs_df, min_pairs=200):
+    print(entry["key"], entry["n_pairs"], entry["status"])
+```
+
+Returns a list with one dict per construction, in this fixed order:
+
+| `key` | `label` | Subset |
+|---|---|---|
+| `SOV` | Canonical (Ref SOV vs any variant) | reference `SOV`, **any** variant |
+| `OSV` | Object-fronted (Ref OSV vs Var SOV) | reference `DOSV` or `IOSV`, variant `SOV` |
+| `DOSV` | Direct-object-fronted (Ref DOSV vs Var SDOV) | reference `DOSV`, variant `SOV` |
+| `IOSV` | Indirect-object-fronted (Ref IOSV vs Var SIOV) | reference `IOSV`, variant `SOV` |
+
+Each entry carries `key`, `label`, `n_pairs` and `status`: `"ok"` (plus the
+full `evaluate_pairs` result — `predictors`, `combined`, …),
+`"insufficient_pairs"` (fewer than `min_pairs` rows) or `"not_evaluable"`
+(with `detail`; too few usable rows or a single `ML_Label` class). Raises
+`ValueError` if the label columns are missing. The subset masks are exposed as
+`construction_mask(pairs_df, reference_labels, variant_labels={"SOV"})`
+(`variant_labels=None` = any variant) and the table as `CONSTRUCTIONS`
+(`(key, label, reference_labels, variant_labels)` tuples).
+
+The `SOV` row is our addition, not a paper row: every pair whose reference is
+canonical, whatever order the variant takes. Every other subset pairs a
+**non-canonical reference with a canonical variant**, so `DOSV` and `IOSV` are
+disjoint and `OSV` is exactly their union. `SOV` + `OSV` is therefore not the
+whole table — the non-`SOV` variants of object-fronted references fall in
+neither. This is
+stricter than the research reproduction's OSV row (which keeps every variant of
+an object-fronted reference), and the paper's own pair counts cannot be
+reconstructed from its text — treat comparisons with its Table 4 (trigram:
+OSV 83.16 / DOSV 78.95 / IOSV 87.29) as indicative, not controlled.
+
+### In the web app
+
+Tick **Evaluate predictor accuracy** (File mode only; Sentence mode never
+evaluates — one sentence cannot yield enough pairs). The job then writes an
+`evaluation.json` artifact and the UI renders a *Ranking accuracy* card:
+combined model first, then each predictor with its accuracy, pair count,
+a bar anchored at the 50% chance line, and the coefficient's plain-English
+direction. (A `±` margin appears beside the accuracy only for artifacts that
+carry `ci_low`/`ci_high` — see the note above.) Fewer than **200 pairs** (or no scorer deltas) produces a
+`status: "insufficient_pairs"` / `"no_predictors"` stub and an explanatory
+note instead of numbers — the threshold lives in `webapp/pipeline.py`
+(`MIN_EVAL_PAIRS`), not in the library.
+
+Below the overall table the card repeats the measurement **per construction**
+(`evaluation.json` → `constructions`, from `evaluate_by_construction` under the
+same 200-pair policy): one heading and table each for SOV references against
+all their variants, then OSV, DOSV and IOSV references against their SOV
+variants, or a "not enough data" note when a construction has too few pairs —
+expect that for the object-fronted rows on small uploads, since only ~10–15% of
+references are object-fronted (the SOV row, ~85% of references, almost always
+qualifies).

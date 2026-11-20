@@ -1,0 +1,25 @@
+#!/bin/bash
+# image: ${image_etag}
+# Boot script for the hindi-nlp webapp demo box. Pulls the pre-built docker
+# image tarball from S3 and runs it as a long-lived container on port 80.
+exec > /var/log/deploy.log 2>&1
+set -x
+
+export AWS_DEFAULT_REGION="${region}"
+
+# mirror the boot log to the serial console (view via: aws ec2 get-console-output)
+( tail -f /var/log/deploy.log > /dev/console 2>/dev/null & )
+
+# Docker (awscli v2 + ssm-agent are already on Amazon Linux 2023)
+dnf install -y docker
+systemctl enable --now docker
+
+mkdir -p /app && cd /app
+aws s3 cp "s3://${bucket}/image.tar.gz" image.tar.gz
+gunzip -c image.tar.gz | docker load
+rm -f image.tar.gz
+
+# --restart unless-stopped => the container also comes back after a plain
+# instance stop/start (that is not a `docker stop`), so start.ps1 needs no
+# re-provisioning. The image binds 8001 internally; publish it on host :80.
+docker run -d --restart unless-stopped -p 80:8001 --name hindi-nlp hindi-nlp-toolkit:latest

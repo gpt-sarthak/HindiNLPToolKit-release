@@ -1,0 +1,266 @@
+# Contributing a Scorer
+
+This is a group project. Everyone contributes by adding their own **scorer** —
+a small module that adds feature column(s) to the reference/variant sentence
+pairs. This guide covers the two things you need: **how the `scoring/` folder
+works**, and the **git branch workflow** to implement your scorer from the
+original repo and get it merged.
+
+You only ever touch the `scoring/` folder. You never edit the web app or the
+generation/filtering engine. Full API details live in [`DOCS.md`](DOCS.md) —
+this file is the quick start.
+
+---
+
+## 1. Get set up
+
+```powershell
+git clone https://github.com/<your-account>/<this-repo>.git
+cd <this-repo>
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install torch==2.12.0 --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt -c constraints.txt
+
+# run the web app locally to see your scorer as a checkbox
+python -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
+```
+
+> The first time you parse a `.txt`/raw-string input, Stanza downloads the Hindi
+> model to `~/stanza_resources/` (slow once, cached after). Pre-annotated
+> `.conllu` uploads don't need it.
+
+---
+
+## 2. Branch workflow (implement from the original)
+
+Always start from an up-to-date `main`, and do your work on a dedicated branch —
+one scorer per branch/PR. Keep `main` clean.
+
+```powershell
+git checkout main
+git pull                                   # get everyone else's merged work
+
+git checkout -b scorer/<your-scorer-name>  # e.g. scorer/my-scorer
+
+# ... add your file in scoring/ and test it (sections 3-5) ...
+
+git add scoring/<your_scorer>.py
+git commit -m "Add <your-scorer-name> scorer"
+git push -u origin scorer/<your-scorer-name>
+```
+
+Then open a **Pull Request** into `main` on GitHub and have another teammate
+review and merge it.
+
+- **Collaborators** (added to the repo): clone and branch directly, as above.
+- **Not a collaborator?** Fork the repo on GitHub, then clone your fork, branch,
+  push to your fork, and open a PR from the fork into the original `main`.
+
+---
+
+## 3. Write the scorer
+
+Create one file in `scoring/`, e.g. `scoring/surprisal_scorer.py`. Subclass
+`Scorer`, set `name` + `display_name` + `description`, and implement `score`.
+That's it — the web app **auto-discovers** it on restart and shows it as a
+checkbox. No registration, no web code.
+
+```python
+from .base import Scorer
+
+class SurprisalScorer(Scorer):
+    name = "surprisal"                      # machine name: API + registry key
+    display_name = "Constituency Surprisal" # title shown in the UI (falls back
+                                            # to `name` if you omit it)
+    description = "One line shown in the web UI."
+
+    def score(self, pairs_df):
+        df = pairs_df.copy()
+        df["Surprisal_Reference"] = ...     # reference-side value (true role)
+        df["Surprisal_Variant"]   = ...     # variant-side value  (true role)
+        return df
+
+    def deltas(self):
+        # The pipeline computes Delta_<name> for you from ML_Label — see below.
+        return [("Delta_Surprisal",
+                 lambda row: row["Surprisal_Reference"],
+                 lambda row: row["Surprisal_Variant"])]
+```
+
+What `score` receives — `pairs_df`, the reference/variant pairs table. These
+columns are **always present**:
+
+| Column | Meaning |
+| --- | --- |
+| `Sent_ID` | id of the source sentence (text; may repeat in an uploaded `.conllu`) |
+| `Variant_ID` | `{Sent_ID}_v{n}` |
+| `Ref_Index` | the reference's position in the submitted file — **the key for anything per reference sentence** (unique, integer) |
+| `Variant_No` | `n`, 1..n within the reference; `(Ref_Index, Variant_No)` sorts back to the submitted order |
+| `ML_Label` | flip signal: `1` = reference shown first, `0` = variant shown first |
+| `Reference_Sentence` | surface text of the original order |
+| `Variant_Sentence` | surface text of the reordered variant |
+| `Reference_Word_Order` / `Variant_Word_Order` | construction of each side — `SOV`, `DOSV` or `IOSV` (the paper's OSV = DOSV or IOSV); present in the web app, and whenever the caller joined `variants.label_word_orders` |
+
+Rules — **do not break these:**
+
+- **Add columns only. Never drop or reorder rows** — downstream code relies on
+  row alignment. You may *compute* in any order (e.g. sorted, batched per
+  reference) as long as you write each result back to its row position.
+- **Work per reference with `helpers.reference_groups(pairs_df)`** — it yields
+  `(Ref_Index, row_positions)` for each reference sentence and its variants, so
+  the reference can be scored once and broadcast. Look up a row's parse with
+  `helpers.reference_lookup(pairs_df, context["passed"])`. Don't group or look
+  up by `Sent_ID`: two different references can share one.
+- **Store true-role values:** `*_Reference` for the reference order,
+  `*_Variant` for the variant order.
+- **Don't compute the difference yourself.** Declare it in `deltas()`. After all
+  selected scorers run, `apply_scorers` computes every `Delta_<name>` from the
+  `ML_Label` flip signal, so all features are differenced consistently:
+
+  ```
+  Delta_<name> = ref - var   if ML_Label == 1   (reference shown first)
+  Delta_<name> = var - ref   if ML_Label == 0   (variant shown first)
+  ```
+
+- **Your delta is automatically an evaluation predictor.** The `evaluation/`
+  package (and the web app's *Evaluate predictor accuracy* option) measures how
+  often each `Delta_<name>` picks the human-written order over the variant
+  (10-fold CV ranking accuracy; chance = 50%). Declaring `deltas()` is all it
+  takes — your scorer shows up in the *Ranking accuracy* results with nothing
+  extra to implement.
+
+- **Optional: vote in word-order recommendations.** Declare which direction of
+  your raw score marks the more natural order, and Sentence-mode runs will
+  include your feature when picking the best word order (the *Recommended word
+  order* card):
+
+  ```python
+  higher_is_more_natural = {"Delta_Surprisal": False}   # False = lower is more natural
+  ```
+
+  Use `False` for surprisal/length-style scores, `True` for likelihood/givenness
+  -style scores. Leave it out to stay out of recommendations.
+
+Read these before you start: `scoring/example_scorer.py` (copy-paste template),
+`scoring/dl_scorer.py` and `scoring/is_scorer.py` (the two built-in scorers).
+
+---
+
+## 4. Using previous-sentence context (and ML models)
+
+If your scorer needs more than the surface strings — the dependency parse, or
+the **preceding sentence(s)** — add an optional `context` parameter to `score`.
+`apply_scorers` passes `context` only to scorers that declare it, so simpler
+scorers are unaffected.
+
+```python
+from helpers import reference_groups
+
+def score(self, pairs_df, context=None):
+    df = pairs_df.copy()
+    corpus = (context or {}).get("corpus")   # helpers.CorpusContext | None
+
+    ref_scores = [None] * len(df)
+    var_scores = [None] * len(df)
+    # One group per reference sentence: its row positions in df.
+    for ref_index, rows in reference_groups(df):
+        first = rows[0]
+        sent_id = df["Sent_ID"].iat[first]
+        # The 1-2 sentences before this one, oldest first ("" if none/no corpus).
+        prev = (corpus.previous_text(sent_id, n=2, ref_index=ref_index)
+                if corpus else "")
+        ref = self.run_model(df["Reference_Sentence"].iat[first], prev)  # once
+        for r in rows:
+            ref_scores[r] = ref
+            var_scores[r] = self.run_model(df["Variant_Sentence"].iat[r], prev)
+    df["MyModel_Reference"] = ref_scores
+    df["MyModel_Variant"]   = var_scores
+    return df
+```
+
+The `context` dict holds:
+
+- `context["corpus"]` — a `helpers.CorpusContext`. Use
+  `corpus.previous_text(sent_id, n=2, ref_index=...)` for the previous **text**,
+  or `corpus.previous(sent_id, n=2, ref_index=...)` for the previous sentences as
+  parsed tokens. Pass the row's `Ref_Index` as `ref_index` so a repeated
+  `Sent_ID` still finds the right predecessor. `n=1` for a single previous
+  sentence; returns `""`/`[]` at the corpus start and at a CoNLL-U `# newdoc`
+  (context never crosses a document boundary). The corpus is the full upload
+  *before* filtering, so a rejected sentence still counts as a predecessor.
+- `context["passed"]` — the filter output (parse / constituents).
+- `context["scheme"]` — `"ud"` or `"paninian"`.
+
+**ML-model scorers** fit this directly: your model takes one sentence (optionally
+plus its previous-sentence context) and returns a number. Score the reference
+order and the variant order **separately** into `*_Reference` / `*_Variant`, and
+declare the `deltas()` — the pipeline handles the rest.
+
+- **Load the model once**, not per row (e.g. a `functools.cached_property` on the
+  instance), so app startup isn't blocked and you don't reload every call.
+- **Treat `context` as read-only** — it is shared across rows and across
+  concurrent web jobs (2 workers). Don't mutate it or stash it on `self`.
+- **Call `helpers.heartbeat()` in long loops** (once per sentence is right) so a
+  user can cancel a run that is inside your scorer. It is a no-op outside the
+  web app, and raises `JobCancelled` when the job was cancelled — let that
+  propagate, don't catch it. If you shell out, wrap the handle in
+  `helpers.register_process(proc)` so the process is killed with the job:
+
+  ```python
+  from helpers import heartbeat, register_process
+
+  for sentence in sentences:
+      heartbeat()
+      ...
+  ```
+- **Keep your model weights and your own loader module out of this repo.** The
+  scorer file goes in `scoring/`; large weight files should be gitignored.
+
+---
+
+## 5. Test it
+
+Restart the web app — your scorer appears as a checkbox. Or check from Python:
+
+```python
+from scoring import get_scorers, apply_scorers
+print(sorted(get_scorers()))                      # your name should be listed
+
+out = apply_scorers(pairs_df, ["<your-name>"], context=context)
+# confirm your columns + Delta_<name> appear and the row count is unchanged
+```
+
+---
+
+## 6. Conventions & don'ts
+
+- **Don't import `webapp` from `scoring`** — dependencies point one way only
+  (`webapp` → logic packages, never the reverse).
+- **Don't mix annotation schemes** in one run — Paninian (`k1`/`k2`/`vmod`, root
+  POS `VM`/`VAUX`) and UD (`nsubj`/`obj`/`obl`, copular roots) have zero deprel
+  overlap.
+- **Don't commit** `venv/`, `__pycache__/`, model weights, or large corpora —
+  `.gitignore` already covers the common cases; add your weight files if needed.
+- Reusable, scorer-agnostic primitives (previous-sentence lookup, rebuilding a
+  variant's tree, the SOV / DOSV / IOSV word-order rule) live in `helpers/` —
+  check there before writing your own.
+- The word-order label columns are **metadata, not features**: read them if
+  you like (`"Reference_Word_Order" in pairs_df.columns` — they are not
+  guaranteed outside the web app), but never treat them as a `*_Reference` /
+  `*_Variant` pair, and never rely on their position in the table.
+- **Adding a scorer? Also add a tile** for it to the user-facing guide at
+  `webapp/static/how-it-works.html` (served at `/how-it-works`) — that page is
+  deliberately hand-written, not generated from `/api/plugins`.
+- **Hiding a scorer from the web app?** Set `active = False` on its class — do
+  not delete the file. It stays usable from the library (`get_scorers`,
+  `apply_scorers`) but drops out of `/api/plugins` and the page, and a job that
+  names it gets a 400. New scorers are active by default.
+- **Adding an expensive endpoint?** Guard it with
+  `Depends(ratelimit.guard(...))` from `webapp/ratelimit.py` rather than an ad
+  hoc check, and give it its own bucket name so it does not share a budget with
+  an unrelated route. Never guard a cheap read — the SPA polls
+  `GET /api/jobs/{id}` every 1.5 s for the whole life of a job, and limiting it
+  breaks the page on the first run.
+
+Full API reference: [`DOCS.md`](DOCS.md).

@@ -1,0 +1,5 @@
+# Extra packages for training/ on top of the toolkit's requirements.txt
+# (which already brings numpy, pandas, scikit-learn, torch and tqdm).
+# Install with:  pip install -r requirements.txt -r training/requirements-train.txt -c constraints.txt
+mwxml==0.3.8
+mwparserfromhell==0.7.2

@@ -1,0 +1,13 @@
+# LF everywhere, also in Windows checkouts: the Docker build compiles and runs
+# these files on Linux, and bash refuses scripts with CRLF line endings.
+* text=auto eol=lf
+
+# Byte-exact files: never touch their line endings.
+*.conllu       -text
+*.gr           binary
+*.synprocmodel binary
+*.jar          binary
+*.npy          binary
+*.pt           binary
+*.pkl          binary
+*.gz           binary

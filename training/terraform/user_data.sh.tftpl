@@ -1,0 +1,65 @@
+#!/bin/bash
+# Model-training job. Runs once at boot, publishes the models, terminates.
+set -uo pipefail
+
+LOG=/var/log/hnt-train.log
+exec > >(tee -a "$LOG") 2>&1
+echo "=== boot $(date -Is) ==="
+
+BUCKET="${bucket}"
+REGION="${region}"
+
+# --- cost cap: dead-man switch, armed before anything can hang ---------------
+shutdown -h +${dead_man_minutes} &
+echo "dead-man shutdown armed: +${dead_man_minutes} min"
+
+push_log() { aws s3 cp "$LOG" "s3://$BUCKET/logs/train.log" --region "$REGION" >/dev/null 2>&1 || true; }
+finish() {
+  echo "$1 $(date -Is)" | aws s3 cp - "s3://$BUCKET/DONE" --region "$REGION" || true
+  push_log
+  shutdown -h now
+  exit 0
+}
+trap push_log EXIT
+( while true; do sleep 60; push_log; done ) &
+
+# --- the Deep Learning AMI's PyTorch interpreter -----------------------------
+PY=""
+for c in /opt/conda/envs/pytorch/bin/python /opt/pytorch/bin/python \
+         /usr/local/bin/python3 /usr/bin/python3; do
+  if [ -x "$c" ] && "$c" -c "import torch" 2>/dev/null; then PY="$c"; break; fi
+done
+[ -n "$PY" ] || finish "FAILED: no python with torch on this AMI"
+echo "python: $PY"
+"$PY" -c "import torch;print('torch',torch.__version__,'cuda',torch.cuda.is_available(),torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
+
+# --- Java for the Berkeley grammar trainer -----------------------------------
+export DEBIAN_FRONTEND=noninteractive
+command -v java >/dev/null || { apt-get update -q && apt-get install -y -q default-jre-headless; } \
+  || finish "FAILED: could not install Java"
+java -version
+
+# --- code + python packages --------------------------------------------------
+WORK=/opt/hnt
+mkdir -p "$WORK"
+aws s3 cp "s3://$BUCKET/code/code.tar.gz" /tmp/code.tar.gz --region "$REGION" || finish "FAILED: code download"
+tar -xzf /tmp/code.tar.gz -C "$WORK" || finish "FAILED: code extract"
+cd "$WORK"
+"$PY" -m pip install -q pandas scikit-learn tqdm -r training/requirements-train.txt \
+  || finish "FAILED: pip install"
+
+# --- train -------------------------------------------------------------------
+echo "=== training start $(date -Is), steps: ${steps} ==="
+PYTHON="$PY" STEPS="${steps}" WIKI_DATE="${wiki_date}" LSTM_ARGS="${lstm_args}" \
+  bash training/run_all.sh
+STATUS=$?
+echo "=== training exit $STATUS at $(date -Is) ==="
+
+# --- publish -----------------------------------------------------------------
+tar -czf /tmp/models.tar.gz -C "$WORK/scoring/models" . && \
+  aws s3 cp /tmp/models.tar.gz "s3://$BUCKET/out/models.tar.gz" --region "$REGION"
+for f in training/work/trigram/lm_report.json; do
+  [ -f "$f" ] && aws s3 cp "$f" "s3://$BUCKET/out/$(basename "$f")" --region "$REGION"
+done
+
+if [ $STATUS -eq 0 ]; then finish "OK"; else finish "FAILED status=$STATUS"; fi

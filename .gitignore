@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Editor / OS
+.vscode/
+.idea/
+**/.DS_Store
+
+# Trained model files: never committed — build them with training/ (see
+# training/README.md). The small recommender weights JSON is the exception.
+scoring/models/*
+!scoring/models/recommender_weights.json
+
+# Generated outputs
+tests/output/
+reproducibility/data/
+training/work/
+webapp/outputs/
+taru/workspace/genmodel/custom/
+taru/workspace/results/
+taru/workspace/bin/
+
+# Terraform state, plans, provider caches and build artefacts (contain your
+# account's resource IDs — never commit them)
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+**/terraform.tfstate.d/
+*.tfplan
+tfplan*
+deploy/build/
+training/terraform/build/

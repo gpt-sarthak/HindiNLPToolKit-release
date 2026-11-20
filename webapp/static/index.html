@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hindi NLP Toolkit — Word-Order Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+Devanagari:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #faf6ee;
+    --paper-deep: #f2ecdf;
+    --ink: #211d16;
+    --ink-soft: #6b6253;
+    --line: #d9d0bd;
+    --vermilion: #c2491d;
+    --vermilion-deep: #9c3713;
+    --green: #3d7a4a;
+    --mono: "IBM Plex Mono", monospace;
+    --sans: "IBM Plex Sans", "Noto Sans Devanagari", sans-serif;
+    --display: "Fraunces", "Noto Sans Devanagari", serif;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: var(--sans);
+    background: var(--paper);
+    background-image: radial-gradient(var(--line) 0.7px, transparent 0.7px);
+    background-size: 26px 26px;
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 0 1.25rem 4rem;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; }
+
+  /* ── Header ─────────────────────────────────────────── */
+  header {
+    padding: 2.6rem 0 1.6rem;
+    border-bottom: 2px solid var(--ink);
+    display: flex; align-items: flex-end; justify-content: space-between;
+    flex-wrap: wrap; gap: 0.8rem;
+    animation: rise 0.5s ease both;
+  }
+  .devanagari-mark {
+    font-family: var(--display);
+    color: var(--vermilion);
+    font-size: 0.95rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(1.9rem, 4.5vw, 2.8rem);
+    line-height: 1.05;
+  }
+  h1 em { font-style: italic; color: var(--vermilion); }
+  .pipeline-trail {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    text-align: right;
+  }
+  .pipeline-trail b { color: var(--vermilion); font-weight: 500; }
+
+  /* ── Layout ─────────────────────────────────────────── */
+  main {
+    display: grid;
+    grid-template-columns: minmax(300px, 380px) 1fr;
+    gap: 1.4rem;
+    margin-top: 1.6rem;
+    align-items: start;
+  }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+
+  .card {
+    background: #fffdf8;
+    border: 1.5px solid var(--ink);
+    box-shadow: 5px 5px 0 var(--paper-deep), 5px 5px 0 1.5px var(--line);
+    padding: 1.4rem;
+    animation: rise 0.5s ease both;
+  }
+  .card + .card { margin-top: 1.4rem; }
+  .card h2 {
+    font-family: var(--display);
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    display: flex; align-items: baseline; gap: 0.5rem;
+  }
+  .card h2 .num {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--vermilion);
+    border: 1px solid var(--vermilion);
+    border-radius: 999px;
+    padding: 0.1rem 0.45rem;
+  }
+
+  /* ── Form ───────────────────────────────────────────── */
+  .dropzone {
+    border: 1.5px dashed var(--ink-soft);
+    background: var(--paper);
+    padding: 1.5rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: 1.1rem;
+  }
+  .dropzone:hover, .dropzone.dragover { border-color: var(--vermilion); background: #fdf3ec; }
+  .dropzone .big { font-family: var(--display); font-size: 1.02rem; }
+  .dropzone .hint { font-size: 0.78rem; color: var(--ink-soft); margin-top: 0.3rem; }
+  .dropzone .picked {
+    font-family: var(--mono); font-size: 0.8rem; color: var(--vermilion-deep);
+    margin-top: 0.5rem; word-break: break-all;
+  }
+  input[type="file"] { display: none; }
+
+  /* Sentence ↔ File input mode */
+  .mode-toggle { display: flex; border: 1.5px solid var(--ink); margin-bottom: 1.1rem; }
+  .mode-toggle button {
+    flex: 1; font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 0.5rem; cursor: pointer;
+    background: var(--paper); color: var(--ink-soft); border: 0;
+    border-right: 1.5px solid var(--ink); transition: background 0.15s, color 0.15s;
+  }
+  .mode-toggle button:last-child { border-right: 0; }
+  .mode-toggle button.active { background: var(--ink); color: var(--paper); }
+  textarea#text-input {
+    width: 100%; min-height: 130px; resize: vertical; display: block;
+    font-family: var(--sans); font-size: 0.95rem; line-height: 1.55;
+    padding: 0.7rem 0.8rem; margin-bottom: 1.1rem;
+    border: 1.5px solid var(--line); background: var(--paper); color: var(--ink);
+  }
+  textarea#text-input.hidden { display: none; }  /* beats the id rule's display:block */
+  textarea#text-input:focus { outline: 2px solid var(--vermilion); outline-offset: -1px; }
+  textarea#text-input::placeholder { color: var(--ink-soft); }
+  select:disabled { opacity: 0.55; cursor: not-allowed; }
+  .scheme-note { display: block; margin-top: 0.3rem; font-size: 0.74rem; color: var(--vermilion-deep); }
+
+  .opt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-bottom: 1rem; }
+  label.field { display: block; font-size: 0.78rem; font-weight: 600; color: var(--ink-soft); }
+  label.field span { display: block; margin-bottom: 0.3rem; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.68rem; }
+  input[type="number"], select {
+    width: 100%;
+    font-family: var(--mono); font-size: 0.88rem;
+    padding: 0.45rem 0.5rem;
+    border: 1.5px solid var(--line); background: var(--paper); color: var(--ink);
+  }
+  input[type="number"]:focus, select:focus { outline: 2px solid var(--vermilion); outline-offset: -1px; }
+
+  fieldset.scorers { border: 1.5px solid var(--line); padding: 0.7rem 0.8rem 0.8rem; margin-bottom: 1.1rem; }
+  fieldset.scorers legend { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); padding: 0 0.35rem; }
+  .scorer-row { display: flex; gap: 0.55rem; align-items: flex-start; font-size: 0.82rem; padding: 0.25rem 0; }
+  .scorer-row input { accent-color: var(--vermilion); margin-top: 0.2rem; }
+  /* pre-line renders the \n before "Feature in CSV:" as a break, while still
+     collapsing the ordinary wrapping whitespace. */
+  .scorer-row .desc { color: var(--ink-soft); font-size: 0.74rem; display: block; white-space: pre-line; }
+  .scorer-row code { font-family: var(--mono); font-size: 0.8rem; }
+  /* Scorer title — also used for the predictor name in the ranking table. */
+  .scorer-row .sname, table.eval .sname { font-weight: 600; font-size: 0.86rem; color: var(--ink); display: block; }
+  .scorer-row .scorer-meta { list-style: none; margin: 0.25rem 0 0; padding: 0; color: var(--ink-soft); font-size: 0.7rem; }
+  .scorer-row .scorer-meta li { position: relative; padding-left: 0.85rem; line-height: 1.4; }
+  .scorer-row .scorer-meta li::before { content: "\2022"; position: absolute; left: 0; color: var(--vermilion); }
+  .scorer-row .scorer-meta strong { color: var(--ink); font-weight: 600; }
+  .scorers .none { font-size: 0.78rem; color: var(--ink-soft); }
+
+  button.go {
+    width: 100%;
+    font-family: var(--display); font-weight: 600; font-size: 1.05rem;
+    background: var(--ink); color: var(--paper);
+    border: 1.5px solid var(--ink);
+    padding: 0.7rem;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+  button.go:hover:not(:disabled) { background: var(--vermilion-deep); border-color: var(--vermilion-deep); }
+  button.go:active:not(:disabled) { transform: translate(2px, 2px); }
+  button.go:disabled { opacity: 0.45; cursor: not-allowed; }
+  .form-error { color: var(--vermilion-deep); font-size: 0.8rem; margin-top: 0.6rem; min-height: 1.1em; }
+
+  /* ── Cancel a running job ───────────────────────────── */
+  .run-actions { margin-top: 0.55rem; }
+  button.cancel {
+    font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+    color: var(--ink-soft); background: var(--paper);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 0.3rem 0.6rem; cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  button.cancel:hover { border-color: var(--ink); color: var(--ink); }
+  button.cancel.danger { color: var(--vermilion-deep); border-color: var(--vermilion-deep); }
+  button.cancel.danger:hover { background: var(--vermilion-deep); color: #fff; }
+  button.cancel:disabled { opacity: 0.45; cursor: not-allowed; }
+  .confirm-row { font-size: 0.76rem; color: var(--ink-soft); line-height: 1.45; margin-top: 0.5rem; }
+  .confirm-buttons { display: flex; gap: 0.4rem; margin-top: 0.45rem; }
+
+  /* ── Stages ─────────────────────────────────────────── */
+  .stage { border-left: 3px solid var(--line); padding: 0.15rem 0 0.9rem 1rem; margin-left: 0.45rem; position: relative; }
+  .stage:last-child { padding-bottom: 0.1rem; }
+  .stage::before {
+    content: ""; position: absolute; left: -8.5px; top: 0.28rem;
+    width: 11px; height: 11px; border-radius: 999px;
+    background: var(--paper); border: 2.5px solid var(--line);
+    transition: all 0.2s;
+  }
+  .stage.running::before { border-color: var(--vermilion); background: var(--vermilion); animation: pulse 1.1s ease infinite; }
+  .stage.done { border-left-color: var(--green); }
+  .stage.done::before { border-color: var(--green); background: var(--green); }
+  .stage.failed::before { border-color: var(--vermilion-deep); background: var(--vermilion-deep); }
+  .stage.cancelled::before { border-color: var(--ink-soft); background: var(--ink-soft); }
+  .stage.cancelled .stage-state { color: var(--ink-soft); }
+  .stage-name { font-family: var(--display); font-weight: 600; font-size: 0.98rem; }
+  .stage-state { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-soft); margin-left: 0.45rem; }
+  .stage.running .stage-state { color: var(--vermilion); }
+  .stage.done .stage-state { color: var(--green); }
+
+  .downloads { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.5rem; }
+  a.dl {
+    font-family: var(--mono); font-size: 0.74rem;
+    text-decoration: none; color: var(--ink);
+    border: 1.5px solid var(--ink);
+    background: var(--paper);
+    padding: 0.32rem 0.6rem;
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    transition: background 0.12s, color 0.12s;
+    animation: rise 0.3s ease both;
+  }
+  a.dl:hover { background: var(--vermilion); border-color: var(--vermilion); color: #fff; }
+  a.dl::before { content: "↓"; font-weight: 700; }
+  .download-all { margin-top: 0.9rem; }
+  a.dl.all { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600; }
+  a.dl.all:hover { background: var(--vermilion-deep); border-color: var(--vermilion-deep); color: #fff; }
+
+  .idle-note, .error-note { font-size: 0.85rem; color: var(--ink-soft); }
+  .error-note { color: var(--vermilion-deep); font-family: var(--mono); font-size: 0.78rem; white-space: pre-wrap; }
+
+  /* ── Summary ────────────────────────────────────────── */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 0.7rem; margin-bottom: 1.1rem; }
+  .stat { border: 1.5px solid var(--line); background: var(--paper); padding: 0.6rem 0.7rem; }
+  .stat .v { font-family: var(--display); font-size: 1.45rem; font-weight: 700; }
+  .stat .k { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin-top: 0.1rem; }
+  .stat.accent .v { color: var(--vermilion); }
+  table.filters { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  table.filters th, table.filters td { text-align: left; padding: 0.42rem 0.5rem; border-bottom: 1px solid var(--line); }
+  table.filters th { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); }
+  table.filters td.n { font-family: var(--mono); text-align: right; }
+  .bar { height: 5px; background: var(--paper-deep); margin-top: 3px; }
+  .bar i { display: block; height: 100%; background: var(--vermilion); }
+
+  /* Evaluate-accuracy option (File mode) + ranking-accuracy card */
+  .eval-opt { border-top: 1px dashed var(--line); margin-top: 0.55rem; padding-top: 0.6rem; }
+  .eval-note { font-size: 0.78rem; color: var(--ink-soft); margin: 0 0 0.9rem; }
+  table.eval { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  table.eval th, table.eval td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.eval th { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); }
+  table.eval td.n { font-family: var(--mono); text-align: right; white-space: nowrap; }
+  table.eval td.acc { font-family: var(--mono); white-space: nowrap; min-width: 9rem; }
+  table.eval tr.combined td { font-weight: 600; }
+  h3.eval-sub { font-size: 0.8rem; margin: 1.1rem 0 0.4rem; }
+  h3.eval-sub .eval-dir { display: inline; margin-left: 0.4rem; font-weight: 400; }
+  .eval-dir { display: block; font-size: 0.68rem; color: var(--ink-soft); font-weight: 400; margin-top: 0.15rem; }
+  .acc-bar { position: relative; height: 5px; background: var(--paper-deep); margin-top: 5px; }
+  .acc-bar i { display: block; position: absolute; top: 0; height: 100%; background: var(--vermilion); }
+  .acc-bar .chance { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 2px; background: var(--ink-soft); }
+
+  /* Recommended word order card (Sentence mode) */
+  .rec-pick { border: 1.5px solid var(--line); border-left: 4px solid var(--vermilion); background: var(--paper); padding: 0.8rem 0.9rem; margin-bottom: 1rem; }
+  .rec-pick.ref { border-left-color: var(--green); }
+  .rec-badge { display: inline-block; font-family: var(--mono); font-size: 0.64rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #fff; background: var(--vermilion); padding: 0.14rem 0.5rem; border-radius: 999px; margin-bottom: 0.45rem; }
+  .rec-pick.ref .rec-badge { background: var(--green); }
+  .rec-sentence { font-family: var(--sans); font-size: 1.05rem; line-height: 1.6; }
+  .rec-table-wrap { overflow-x: auto; }
+  table.eval td.rec-sent { min-width: 15rem; }
+  table.eval tr.rec-best td { font-weight: 600; background: #f4efe2; }
+  .rec-tag { font-family: var(--mono); font-size: 0.62rem; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px; padding: 0.05rem 0.4rem; margin-left: 0.35rem; white-space: nowrap; }
+  .rec-subhead { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-soft); margin: 0.8rem 0 0.4rem; }
+
+  footer { margin-top: 2.6rem; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-soft); text-align: center; }
+  footer a { color: var(--vermilion-deep); }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(194,73,29,0.45); } 50% { box-shadow: 0 0 0 6px rgba(194,73,29,0); } }
+
+  /* ── context sentence box ── */
+  .context-field { margin-top: 0.6rem; }
+  .ctx-label { display: block; font-size: 0.72rem; font-weight: 600; color: var(--ink-soft); margin-bottom: 0.25rem; }
+  .ctx-label span { font-weight: 400; }
+  textarea#context-input { width: 100%; box-sizing: border-box; min-height: 2.6rem; padding: 0.55rem 0.7rem; font: inherit; font-size: 0.9rem; color: var(--ink); background: var(--paper); border: 1.5px solid var(--line); border-radius: 7px; resize: vertical; }
+  textarea#context-input:focus { outline: none; border-color: var(--vermilion); }
+  .ctx-note { display: block; font-size: 0.68rem; color: var(--ink-soft); margin-top: 0.3rem; }
+
+  /* ── tree cards (two clean white boxes side by side; contained + scrollable) ── */
+  .trees { margin-top: 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; align-items: start; }
+  .tree-block { min-width: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+  .tree-head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; padding: 0.45rem 0.6rem; background: #fff; border-bottom: 1px solid var(--line); }
+  .tree-head h3 { margin: 0; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
+  .tree-expand { font-family: var(--mono); font-size: 0.68rem; font-weight: 600; color: var(--vermilion-deep); background: var(--paper); border: 1px solid var(--line); border-radius: 5px; padding: 0.2rem 0.5rem; cursor: pointer; }
+  .tree-expand:hover { background: var(--vermilion); color: #fff; border-color: var(--vermilion); }
+  /* overflow:auto + min-width:0 on the block keep a wide/tall diagram scrolling
+     INSIDE the box — it can never widen the page or shift the layout/zoom. */
+  .tree-view { overflow: auto; max-height: 300px; padding: 0.6rem; background: #fff; }
+  .tree-view svg { display: block; }
+  .tree-msg { font-size: 0.75rem; color: var(--ink-soft); padding: 0.5rem 0.4rem; }
+  .tree-msg.err { color: var(--vermilion-deep); }
+
+  /* ── dependency tree (RUG CoNLL-U viewer style) ── */
+  .ud-tree [data-node], .ud-tree [data-edge] { cursor: pointer; }
+  /* The viewer's tooltip.css (#ttcont), over the page and the expand overlay. */
+  #ud-tt { position: fixed; display: none; z-index: 1000; max-width: 500px; margin: 5px 0;
+           padding: .5em 1em; background: #666; color: #fff; opacity: 0;
+           transition: opacity .2s; pointer-events: none; }
+
+  /* ── expand overlay ── */
+  .tree-overlay { position: fixed; inset: 0; z-index: 300; background: rgba(20,18,12,.5); backdrop-filter: blur(2px); display: flex; flex-direction: column; }
+  .tree-overlay-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.7rem 1rem; background: var(--paper); border-bottom: 1px solid var(--line); }
+  .tree-overlay-bar span { font-size: 0.8rem; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; }
+  .tree-overlay-bar button { font-family: var(--mono); font-size: 0.75rem; font-weight: 600; color: var(--vermilion-deep); background: none; border: 1px solid var(--line); border-radius: 5px; padding: 0.25rem 0.6rem; cursor: pointer; }
+  .tree-overlay-bar button:hover { background: var(--vermilion); color: #fff; border-color: var(--vermilion); }
+  .tree-overlay-body { flex: 1; overflow: auto; padding: 1.5rem; background: var(--paper); text-align: center; }
+  .tree-overlay-body svg { display: inline-block; }
+
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="devanagari-mark">वाक्य · क्रम · विश्लेषण</div>
+      <h1>Hindi Word-Order <em>Pipeline</em></h1>
+    </div>
+    <div class="pipeline-trail">upload → <b>parse</b> → <b>filter</b> → <b>variants</b> → download</div>
+  </header>
+
+  <main>
+    <!-- ── Left: form ── -->
+    <section class="card" style="animation-delay:0.05s">
+      <h2><span class="num">01</span> Corpus &amp; options</h2>
+      <form id="job-form">
+        <div class="mode-toggle" id="mode-toggle">
+          <button type="button" data-mode="sentence" class="active">Sentence</button>
+          <button type="button" data-mode="file">File</button>
+        </div>
+
+        <textarea id="text-input" name="text"
+          placeholder="Type one Hindi sentence.&#10;राम ने बाज़ार से ताज़ी सब्जियाँ और फल ख़रीदे।"></textarea>
+
+        <div class="context-field hidden" id="context-field">
+          <label class="ctx-label" for="context-input">Context sentence <span>(optional — the preceding sentence)</span></label>
+          <textarea id="context-input" name="context_text"
+            placeholder="Optional: the sentence that comes before — used by context-aware scorers."></textarea>
+          <span class="ctx-note">Adaptive LSTM and Information Status run only when a context sentence is given.</span>
+        </div>
+
+        <div class="dropzone hidden" id="dropzone">
+          <div class="big">Drop a file here, or click to browse</div>
+          <div class="hint">.conllu (parsed treebank) or .txt (one Hindi sentence per line, parsed with Stanza)</div>
+          <div class="picked" id="picked-name"></div>
+          <input type="file" id="file-input" accept=".conllu,.txt">
+        </div>
+
+        <div class="opt-grid">
+          <label class="field"><span>Max variants / sentence</span>
+            <input type="number" name="max_variants" value="99" min="1" max="500">
+          </label>
+          <label class="field" style="grid-column: 1 / -1;"><span>Annotation scheme</span>
+            <select name="root_pos" id="root-pos">
+              <option value="paninian">Paninian (k1/k2, VM/VAUX) — for ISCNLP-style .conllu</option>
+              <option value="ud">UD (nsubj/obj, copular NOUN/ADJ roots) — for UD .conllu or parsed .txt</option>
+            </select>
+            <span class="desc">Drives root-POS handling and scheme-aware scorers (e.g. Information Status). Raw / .txt input is parsed by Stanza as UD, so pick UD for those; Paninian applies to pre-annotated Paninian .conllu.</span>
+            <span class="scheme-note hidden" id="scheme-note">Typed sentences are parsed by Stanza as UD — scheme is fixed to UD.</span>
+          </label>
+        </div>
+
+        <fieldset class="scorers">
+          <legend>Cognitive scorers</legend>
+          <div id="scorer-list"><span class="none">Loading…</span></div>
+          <label class="scorer-row eval-opt hidden" id="evaluate-field">
+            <input type="checkbox" id="evaluate-input">
+            <span>Evaluate predictor accuracy
+              <span class="desc">10-fold cross-validation: how often each ticked scorer picks the human-written order over its variants. Needs at least 200 (reference, variant) pairs.</span>
+            </span>
+          </label>
+          <label class="scorer-row eval-opt hidden" id="recommend-field">
+            <input type="checkbox" id="recommend-input" checked>
+            <span>Recommend a word order
+              <span class="desc">Rank your sentence against its variants with the ticked scorers and pick the most natural order. Also adds the Recommended_* columns to variants.csv.</span>
+            </span>
+          </label>
+        </fieldset>
+
+        <button type="submit" class="go" id="submit-btn" disabled>Run pipeline</button>
+        <div class="run-actions hidden" id="cancel-wrap">
+          <button type="button" class="cancel" id="cancel-btn">Cancel run</button>
+          <div class="confirm-row hidden" id="cancel-confirm">
+            <span>Stop this run? Artifacts already produced are kept, but the run cannot be resumed.</span>
+            <span class="confirm-buttons">
+              <button type="button" class="cancel danger" id="cancel-yes">Yes, stop it</button>
+              <button type="button" class="cancel" id="cancel-no">Keep running</button>
+            </span>
+          </div>
+        </div>
+        <div class="form-error" id="form-error"></div>
+      </form>
+    </section>
+
+    <!-- ── Right: results ── -->
+    <section>
+      <div class="card" style="animation-delay:0.12s">
+        <h2><span class="num">02</span> Pipeline progress</h2>
+        <p class="idle-note" id="idle-note">Waiting for a corpus — results appear here stage by stage, and every file is downloadable as soon as its stage finishes.</p>
+        <div id="stages" class="hidden">
+          <div class="stage" data-stage="parse">
+            <span class="stage-name">Parse</span><span class="stage-state">pending</span>
+            <div class="downloads"></div>
+          </div>
+          <div class="stage" data-stage="filter">
+            <span class="stage-name">Filter</span><span class="stage-state">pending</span>
+            <div class="downloads"></div>
+          </div>
+          <div class="stage" data-stage="variants">
+            <span class="stage-name">Variants &amp; scores</span><span class="stage-state">pending</span>
+            <div class="downloads"></div>
+          </div>
+        </div>
+        <div class="download-all hidden" id="download-all">
+          <a class="dl all" id="download-all-link" href="#">Download all files (.zip)</a>
+        </div>
+        <div class="trees hidden" id="trees">
+          <div class="tree-block">
+            <div class="tree-head">
+              <h3>Dependency tree</h3>
+              <button type="button" class="tree-expand" data-tree="dep">⤢ Expand</button>
+            </div>
+            <div class="tree-view" id="dep-tree"></div>
+          </div>
+          <div class="tree-block">
+            <div class="tree-head">
+              <h3>Constituency tree</h3>
+              <button type="button" class="tree-expand" data-tree="con">⤢ Expand</button>
+            </div>
+            <div class="tree-view" id="con-tree"></div>
+          </div>
+        </div>
+        <p class="error-note hidden" id="error-note"></p>
+      </div>
+
+      <div class="card hidden" id="recommend-card" style="animation-delay:0.18s">
+        <h2><span class="num">03</span> Recommended word order</h2>
+        <p class="eval-note">The most natural order among your sentence and its variants: each ticked scorer's raw scores are compared across all candidates (↓ lower = more natural, ↑ higher = more natural) and combined with corpus-trained weights.</p>
+        <div id="recommend-body"></div>
+      </div>
+
+      <div class="card hidden" id="summary-card" style="animation-delay:0.21s">
+        <h2><span class="num">04</span> Filter summary</h2>
+        <div class="stats" id="stats"></div>
+        <table class="filters">
+          <thead><tr><th>Filter</th><th style="text-align:right">Rejected</th><th style="width:38%"></th></tr></thead>
+          <tbody id="filter-rows"></tbody>
+        </table>
+      </div>
+
+      <div class="card hidden" id="eval-card" style="animation-delay:0.24s">
+        <h2><span class="num">05</span> Ranking accuracy</h2>
+        <p class="eval-note">How often a model using only this feature picks the human-written order over the reordered variant (50% = chance).</p>
+        <div id="eval-body"></div>
+      </div>
+
+      <div class="card" id="taru-card" style="animation-delay:0.27s">
+        <h2><span class="num">06</span> Syntactic Tree &amp; Surprisal toolkit</h2>
+        <p class="idle-note">Parse Hindi into constituency trees and per-word surprisal with the toolkit — its own HDTB grammar and incremental parser. Open it as its own page; nothing leaves this server.</p>
+        <div class="downloads" style="margin-top:0.8rem">
+          <a class="dl" id="taru-open" href="/taru" target="_blank" rel="noopener" style="text-decoration:none">Open Tree &amp; Surprisal →</a>
+        </div>
+      </div>
+    </section>
+    </section>
+  </main>
+
+  <div class="tree-overlay hidden" id="tree-overlay">
+    <div class="tree-overlay-bar">
+      <span id="tree-overlay-title"></span>
+      <button type="button" id="tree-overlay-close">✕ Close</button>
+    </div>
+    <div class="tree-overlay-body" id="tree-overlay-body"></div>
+  </div>
+
+  <footer>
+    HindiNLPToolKit · dependency-length research · API docs at <a href="/docs">/docs</a>
+  </footer>
+</div>
+
+<script>
+const ARTIFACT_STAGE = {
+  "parsed.conllu": "parse",
+  "passed_sentences.csv": "filter",
+  "rejected_sentences.csv": "filter",
+  "summary.json": "filter",
+  "variants.csv": "variants",
+  "evaluation.json": "variants",
+  "recommendation.json": "variants",
+};
+const ARTIFACT_LABEL = {
+  "parsed.conllu": "parsed.conllu",
+  "passed_sentences.csv": "passed.csv",
+  "rejected_sentences.csv": "rejected.csv",
+  "summary.json": "summary.json",
+  "variants.csv": "variants.csv",
+  "evaluation.json": "evaluation.json",
+  "recommendation.json": "recommendation.json",
+};
+const STAGE_ORDER = ["parse", "filter", "variants"];
+// Mirrors MAX_UPLOAD_BYTES in webapp/app.py — keep the two in step. The server
+// is the enforcer; this only avoids uploading a file that is certain to fail.
+const MAX_UPLOAD_MB = 250;
+
+const fileInput = document.getElementById("file-input");
+const dropzone = document.getElementById("dropzone");
+const pickedName = document.getElementById("picked-name");
+const submitBtn = document.getElementById("submit-btn");
+const formError = document.getElementById("form-error");
+const textInput = document.getElementById("text-input");
+const modeToggle = document.getElementById("mode-toggle");
+const rootPos = document.getElementById("root-pos");
+const schemeNote = document.getElementById("scheme-note");
+const contextInput = document.getElementById("context-input");
+const contextField = document.getElementById("context-field");
+const cancelWrap = document.getElementById("cancel-wrap");
+const cancelBtn = document.getElementById("cancel-btn");
+const cancelConfirm = document.getElementById("cancel-confirm");
+let inputMode = "sentence";  // "sentence" | "file"
+let pollTimer = null;
+let currentJobId = null;      // the job this page is attached to (cancel target)
+let treesRenderedFor = null;  // jobId whose trees are already drawn
+let evalRenderedFor = null;   // jobId whose ranking-accuracy card is drawn
+let recRenderedFor = null;    // jobId whose recommended-order card is drawn
+
+// ── Scorer checkboxes from the plugin registry ──────────────
+fetch("/api/plugins").then(r => r.json()).then(plugins => {
+  const box = document.getElementById("scorer-list");
+  if (!plugins.length) {
+    box.innerHTML = '<span class="none">No scorer plugins found — add one in scoring/.</span>';
+    return;
+  }
+  box.innerHTML = "";
+  for (const p of plugins) {
+    const row = document.createElement("label");
+    row.className = "scorer-row";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = p.name;
+
+    const info = document.createElement("span");
+    // Human title; the machine name stays on the checkbox value only.
+    const title = document.createElement("span");
+    title.className = "sname";
+    title.textContent = p.display_name || p.name;
+    const desc = document.createElement("span");
+    desc.className = "desc";
+    desc.textContent = p.description;
+    info.append(title, desc);
+
+    // Standardized metadata bullets (only the fields the scorer filled in).
+    const meta = [
+      ["Trained on", p.trained_on],
+      ["Built with", p.built_with],
+      ["Notes", p.notes],
+      ["Requires", p.needs_previous_sentence ? "a context sentence" : ""],
+    ].filter(([, v]) => v);
+    if (meta.length) {
+      const ul = document.createElement("ul");
+      ul.className = "scorer-meta";
+      for (const [label, value] of meta) {
+        const li = document.createElement("li");
+        const b = document.createElement("strong");
+        b.textContent = `${label}: `;
+        li.append(b, document.createTextNode(value));
+        ul.appendChild(li);
+      }
+      info.appendChild(ul);
+    }
+
+    row.append(cb, info);
+    box.appendChild(row);
+  }
+}).catch(() => {
+  document.getElementById("scorer-list").innerHTML =
+    '<span class="none">Could not load plugins.</span>';
+});
+
+// ── Input mode (Sentence ↔ File) ────────────────────────────
+modeToggle.addEventListener("click", e => {
+  const btn = e.target.closest("button[data-mode]");
+  if (btn) setMode(btn.dataset.mode);
+});
+
+function setMode(mode) {
+  inputMode = mode;
+  sessionStorage.setItem("hnt.mode", mode);
+  for (const b of modeToggle.querySelectorAll("button")) {
+    b.classList.toggle("active", b.dataset.mode === mode);
+  }
+  const sentence = mode === "sentence";
+  textInput.classList.toggle("hidden", !sentence);
+  contextField.classList.toggle("hidden", !sentence);
+  dropzone.classList.toggle("hidden", sentence);
+  // Ranking-accuracy evaluation needs a corpus-sized pair set — File mode only.
+  document.getElementById("evaluate-field").classList.toggle("hidden", sentence);
+  // The word-order recommendation is the Sentence-mode headline result.
+  document.getElementById("recommend-field").classList.toggle("hidden", !sentence);
+  // Typed text is parsed by Stanza as UD — lock the scheme to UD.
+  rootPos.disabled = sentence;
+  schemeNote.classList.toggle("hidden", !sentence);
+  if (sentence) rootPos.value = "ud";
+  formError.textContent = "";
+  updateSubmitState();
+}
+
+function updateSubmitState() {
+  submitBtn.disabled = inputMode === "sentence"
+    ? textInput.value.trim() === ""
+    : fileInput.files.length === 0;
+}
+
+// ── Session persistence (survive navigating to /taru and back) ──────────
+// Re-attach to a still-live job: repaint its stages, chips and summary, and
+// resume polling if it is not finished. Silently drops expired job ids.
+async function attachJob(jobId) {
+  let res;
+  try { res = await fetch(`/api/jobs/${jobId}`); }
+  catch { sessionStorage.removeItem("hnt.jobId"); return; }
+  if (!res.ok) { sessionStorage.removeItem("hnt.jobId"); return; }  // expired
+  const job = await res.json();
+  currentJobId = jobId;
+  document.getElementById("idle-note").classList.add("hidden");
+  document.getElementById("stages").classList.remove("hidden");
+  render(job, jobId);
+  if (job.status === "failed") showError(job.error);
+  // A cancelled job is over — repaint it, but never resume polling it.
+  else if (job.status !== "done" && job.status !== "cancelled") startPolling(jobId);
+}
+
+function restoreSession() {
+  clearInterval(pollTimer);
+  const mode = sessionStorage.getItem("hnt.mode") || "sentence";
+  textInput.value = sessionStorage.getItem("hnt.text") || "";
+  contextInput.value = sessionStorage.getItem("hnt.context") || "";
+  setMode(mode);
+  const fileName = sessionStorage.getItem("hnt.fileName");
+  if (mode === "file" && fileName && fileInput.files.length === 0) {
+    pickedName.textContent = `${fileName} · re-select to run again`;
+  }
+  const jobId = sessionStorage.getItem("hnt.jobId");
+  if (jobId) attachJob(jobId);
+}
+
+// pageshow fires on the initial load AND on back/forward (bfcache) restore,
+// so the page rebuilds its state in both cases.
+window.addEventListener("pageshow", restoreSession);
+
+// ── File picking ────────────────────────────────────────────
+dropzone.addEventListener("click", () => fileInput.click());
+dropzone.addEventListener("dragover", e => { e.preventDefault(); dropzone.classList.add("dragover"); });
+dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+dropzone.addEventListener("drop", e => {
+  e.preventDefault();
+  dropzone.classList.remove("dragover");
+  if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; onFilePicked(); }
+});
+fileInput.addEventListener("change", onFilePicked);
+textInput.addEventListener("input", () => {
+  sessionStorage.setItem("hnt.text", textInput.value);
+  formError.textContent = ""; updateSubmitState();
+});
+contextInput.addEventListener("input", () => {
+  sessionStorage.setItem("hnt.context", contextInput.value);
+});
+
+function onFilePicked() {
+  const f = fileInput.files[0];
+  if (!f) return;
+  pickedName.textContent = `${f.name} · ${(f.size / 1024).toFixed(1)} KB`;
+  sessionStorage.setItem("hnt.fileName", f.name);
+  formError.textContent = "";
+  updateSubmitState();
+}
+
+// ── Submit ──────────────────────────────────────────────────
+document.getElementById("job-form").addEventListener("submit", async e => {
+  e.preventDefault();
+
+  const fd = new FormData();
+  if (inputMode === "sentence") {
+    const text = textInput.value.trim();
+    if (!text) return;
+    fd.append("text", text);
+    fd.append("context_text", contextInput.value.trim());
+    fd.append("root_pos", "ud");
+    fd.append("recommend", document.getElementById("recommend-input").checked ? "true" : "false");
+  } else {
+    const f = fileInput.files[0];
+    if (!f) return;
+    // Refuse an oversized file here rather than uploading it just to be told
+    // 413. The server still enforces the cap — this only saves the transfer.
+    if (f.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      formError.textContent = `That file is ${(f.size / (1024 * 1024)).toFixed(0)} MB — the limit is ${MAX_UPLOAD_MB} MB.`;
+      return;
+    }
+    fd.append("file", f);
+    fd.append("root_pos", rootPos.value);
+    fd.append("evaluate", document.getElementById("evaluate-input").checked ? "true" : "false");
+  }
+  fd.append("max_variants", e.target.max_variants.value);
+  const checked = [...document.querySelectorAll("#scorer-list input:checked")].map(c => c.value);
+  fd.append("scorers", checked.join(","));
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Submitting…";
+  formError.textContent = "";
+  resetResults();
+
+  try {
+    const res = await fetch("/api/jobs", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    sessionStorage.setItem("hnt.jobId", data.job_id);
+    currentJobId = data.job_id;
+    startPolling(data.job_id);
+  } catch (err) {
+    formError.textContent = err.message;
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Run pipeline";
+  }
+});
+
+// ── Polling & rendering ─────────────────────────────────────
+function resetResults() {
+  clearInterval(pollTimer);
+  document.getElementById("idle-note").classList.add("hidden");
+  document.getElementById("stages").classList.remove("hidden");
+  document.getElementById("error-note").classList.add("hidden");
+  document.getElementById("summary-card").classList.add("hidden");
+  document.getElementById("eval-card").classList.add("hidden");
+  document.getElementById("recommend-card").classList.add("hidden");
+  document.getElementById("download-all").classList.add("hidden");
+  document.getElementById("trees").classList.add("hidden");
+  treesRenderedFor = null;
+  evalRenderedFor = null;
+  recRenderedFor = null;
+  hideCancel();
+  for (const el of document.querySelectorAll(".stage")) {
+    el.className = "stage";
+    el.querySelector(".stage-state").textContent = "pending";
+    el.querySelector(".downloads").innerHTML = "";
+  }
+}
+
+function startPolling(jobId) {
+  submitBtn.textContent = "Running…";
+  showCancel();
+  const tick = async () => {
+    let job;
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`);
+      if (!res.ok) throw new Error("job lost");
+      job = await res.json();
+    } catch {
+      clearInterval(pollTimer);
+      hideCancel();
+      showError("Lost contact with the job. Reload and try again.");
+      return;
+    }
+    render(job, jobId);
+    if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
+      finishRun();
+      if (job.status === "failed") showError(job.error);
+    }
+  };
+  tick();
+  pollTimer = setInterval(tick, 1500);
+}
+
+// Stop polling and hand the form back to the user, whatever ended the run.
+function finishRun() {
+  clearInterval(pollTimer);
+  hideCancel();
+  submitBtn.disabled = false;
+  submitBtn.textContent = "Run pipeline";
+}
+
+// ── Cancel ──────────────────────────────────────────────────
+function showCancel() {
+  cancelWrap.classList.remove("hidden");
+  cancelBtn.classList.remove("hidden");
+  cancelConfirm.classList.add("hidden");
+  cancelBtn.disabled = false;
+}
+
+function hideCancel() {
+  cancelWrap.classList.add("hidden");
+  cancelConfirm.classList.add("hidden");
+}
+
+cancelBtn.addEventListener("click", () => {
+  cancelBtn.classList.add("hidden");
+  cancelConfirm.classList.remove("hidden");
+});
+
+document.getElementById("cancel-no").addEventListener("click", showCancel);
+
+document.getElementById("cancel-yes").addEventListener("click", async () => {
+  if (!currentJobId) { finishRun(); return; }
+  const jobId = currentJobId;
+  // Stop polling first: the job is already doomed server-side by the time the
+  // POST returns, and a tick in flight would repaint it as still running.
+  clearInterval(pollTimer);
+  cancelConfirm.classList.add("hidden");
+  try {
+    const res = await fetch(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+    const job = await res.json();
+    if (!res.ok) throw new Error(job.detail || res.statusText);
+    render(job, jobId);
+  } catch (err) {
+    formError.textContent = `Could not cancel: ${err.message}`;
+  }
+  finishRun();
+});
+
+function render(job, jobId) {
+  const currentIdx = STAGE_ORDER.indexOf(job.stage);
+  const cancelled = job.status === "cancelled";
+  for (const el of document.querySelectorAll(".stage")) {
+    const name = el.dataset.stage;
+    const idx = STAGE_ORDER.indexOf(name);
+    const state = el.querySelector(".stage-state");
+    el.classList.remove("running", "done", "failed", "cancelled");
+    if (job.status === "queued") {
+      state.textContent = "queued";
+    } else if (job.stage === "complete" || job.status === "done" || idx < currentIdx) {
+      el.classList.add("done"); state.textContent = "done";
+    // A job cancelled before it started has no stage — mark the first one.
+    } else if (idx === currentIdx || (cancelled && currentIdx < 0 && idx === 0)) {
+      if (cancelled) { el.classList.add("cancelled"); state.textContent = "cancelled"; }
+      else if (job.status === "failed") { el.classList.add("failed"); state.textContent = "failed"; }
+      else { el.classList.add("running"); state.textContent = "running…"; }
+    } else {
+      state.textContent = cancelled ? "not run" : "pending";
+    }
+  }
+
+  // Download chips appear the moment an artifact is registered.
+  for (const name of job.artifacts) {
+    const stage = ARTIFACT_STAGE[name] || "variants";
+    const holder = document.querySelector(`.stage[data-stage="${stage}"] .downloads`);
+    if (!holder || holder.querySelector(`[data-file="${name}"]`)) continue;
+    const a = document.createElement("a");
+    a.className = "dl";
+    a.dataset.file = name;
+    a.href = `/api/jobs/${jobId}/files/${name}`;
+    a.textContent = ARTIFACT_LABEL[name] || name;
+    holder.appendChild(a);
+  }
+
+  // "Download all" appears once there is more than one file to bundle.
+  if (job.artifacts.length > 1) {
+    document.getElementById("download-all-link").href = `/api/jobs/${jobId}/files.zip`;
+    document.getElementById("download-all").classList.remove("hidden");
+  }
+
+  if (job.summary) renderSummary(job.summary);
+
+  // Draw the trees once, when the single sentence's parse is ready.
+  if (job.status === "done" && job.artifacts.includes("parsed.conllu")
+      && treesRenderedFor !== jobId) {
+    treesRenderedFor = jobId;
+    renderTrees(jobId);
+  }
+
+  // Ranking-accuracy card, once, when the evaluation artifact is ready.
+  if (job.artifacts.includes("evaluation.json") && evalRenderedFor !== jobId) {
+    evalRenderedFor = jobId;
+    fetch(`/api/jobs/${jobId}/files/evaluation.json`)
+      .then(r => r.json())
+      .then(renderEvaluation)
+      .catch(() => { evalRenderedFor = null; });
+  }
+
+  // Recommended-order card, once, when the recommendation artifact is ready.
+  if (job.artifacts.includes("recommendation.json") && recRenderedFor !== jobId) {
+    recRenderedFor = jobId;
+    fetch(`/api/jobs/${jobId}/files/recommendation.json`)
+      .then(r => r.json())
+      .then(renderRecommendation)
+      .catch(() => { recRenderedFor = null; });
+  }
+}
+
+function renderRecommendation(rec) {
+  const card = document.getElementById("recommend-card");
+  const body = document.getElementById("recommend-body");
+  card.classList.remove("hidden");
+  body.innerHTML = "";
+
+  if (rec.status !== "ok") {
+    const note = document.createElement("p");
+    note.className = "idle-note";
+    note.textContent = rec.status === "no_scorers"
+      ? "No rankable scorer features — tick at least one scorer and run again."
+      : "No variants were generated for this sentence, so there is nothing to rank.";
+    body.appendChild(note);
+    return;
+  }
+
+  const fmt = v => v == null ? "—" : (Number.isInteger(v) ? String(v) : v.toFixed(2));
+
+  for (const sent of rec.sentences) {
+    if (rec.sentences.length > 1) {
+      const h = document.createElement("p");
+      h.className = "rec-subhead";
+      h.textContent = sent.sent_id;
+      body.appendChild(h);
+    }
+
+    // Headline: the winning word order.
+    if (sent.recommended) {
+      const pick = document.createElement("div");
+      pick.className = "rec-pick" + (sent.recommended.is_reference ? " ref" : "");
+      pick.innerHTML = `<span class="rec-badge">${sent.recommended.is_reference
+          ? "your original order" : "reordered variant"}</span>
+        <div class="rec-sentence">${esc(sent.recommended.sentence)}</div>`;
+      body.appendChild(pick);
+    }
+
+    // All candidates, best first (raw feature values + combined score).
+    const wrap = document.createElement("div");
+    wrap.className = "rec-table-wrap";
+    const table = document.createElement("table");
+    table.className = "eval";
+    const headCells = rec.features.map(f =>
+      `<th title="${esc(f.display_name || f.scorer)}">${esc(f.delta.replace(/^Delta_/, ""))} ${f.higher_is_more_natural ? "↑" : "↓"}</th>`
+    ).join("");
+    table.innerHTML = `<thead><tr><th>Word order</th>${headCells}<th style="text-align:right">Score</th></tr></thead>`;
+    const tbody = document.createElement("tbody");
+    const bestId = sent.recommended ? sent.recommended.id : null;
+    const ranked = [...sent.candidates].sort((a, b) =>
+      (b.score == null ? -Infinity : b.score) - (a.score == null ? -Infinity : a.score));
+    for (const c of ranked) {
+      const tr = document.createElement("tr");
+      if (c.id === bestId) tr.className = "rec-best";
+      const cells = rec.features.map(f => `<td class="n">${fmt(c.values[f.delta])}</td>`).join("");
+      tr.innerHTML = `<td class="rec-sent">${esc(c.sentence)}${c.is_reference
+          ? '<span class="rec-tag">reference</span>' : ""}</td>${cells}<td class="n">${fmt(c.score)}</td>`;
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    body.appendChild(wrap);
+  }
+}
+
+function renderEvaluation(ev) {
+  const card = document.getElementById("eval-card");
+  const body = document.getElementById("eval-body");
+  card.classList.remove("hidden");
+  body.innerHTML = "";
+
+  if (ev.status !== "ok") {
+    const note = document.createElement("p");
+    note.className = "idle-note";
+    note.textContent = ev.status === "no_predictors"
+      ? "No scorer features to evaluate — tick at least one scorer and run again."
+      : `Not enough data: ${ev.n_pairs} (reference, variant) pairs generated, ` +
+        `at least ${ev.min_pairs} are needed for a reliable accuracy estimate.`;
+    body.appendChild(note);
+    return;
+  }
+
+  body.appendChild(evalTable(ev));
+
+  // The same measurement per word-order construction: canonical SOV references
+  // against every variant, then paper Table 4 (an object-fronted reference
+  // against its canonical SOV variants).  Older
+  // evaluation.json files have no `constructions` key — then nothing renders.
+  for (const c of ev.constructions || []) {
+    const h = document.createElement("h3");
+    h.className = "eval-sub";
+    h.innerHTML = `${esc(c.label)} <span class="eval-dir">${c.n_pairs} pairs</span>`;
+    body.appendChild(h);
+    if (c.status === "ok") {
+      body.appendChild(evalTable(c));
+    } else {
+      const note = document.createElement("p");
+      note.className = "idle-note";
+      note.textContent = c.status === "insufficient_pairs"
+        ? `Not enough data: ${c.n_pairs} pairs of this construction, at least ${ev.min_pairs} are needed.`
+        : `Could not evaluate this construction: ${c.detail || c.status}.`;
+      body.appendChild(note);
+    }
+  }
+}
+
+// One Predictor / Accuracy / Pairs table for an evaluate_pairs() result
+// (the overall table and each per-construction table share it).
+function evalTable(res) {
+  const table = document.createElement("table");
+  table.className = "eval";
+  table.innerHTML = "<thead><tr><th>Predictor</th><th>Accuracy</th><th style='text-align:right'>Pairs</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+
+  const accCell = (acc, lo, hi) => {
+    const pct = acc * 100;
+    const left = Math.min(pct, 50);
+    const width = Math.abs(pct - 50);
+    // The confidence interval is optional: evaluation.json omits ci_low/ci_high
+    // while INCLUDE_CI is off in evaluation/ranking.py, but older artifacts
+    // still carry them.  Show the margin only when both bounds are present.
+    const ci = Number.isFinite(lo) && Number.isFinite(hi)
+      ? `<span class="eval-dir">±${(((hi - lo) / 2) * 100).toFixed(1)}</span>`
+      : "";
+    return `${pct.toFixed(1)}% ${ci}
+      <div class="acc-bar"><i style="left:${left}%;width:${width}%"></i><span class="chance"></span></div>`;
+  };
+
+  if (res.combined) {
+    const tr = document.createElement("tr");
+    tr.className = "combined";
+    tr.innerHTML = `<td>All predictors combined
+        <span class="eval-dir">${res.combined.deltas.length} features, one model</span></td>
+      <td class="acc">${accCell(res.combined.accuracy, res.combined.ci_low, res.combined.ci_high)}</td>
+      <td class="n">${res.combined.n}</td>`;
+    tbody.appendChild(tr);
+  }
+  for (const p of res.predictors) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><span class="sname">${esc(p.label)}</span>
+        <span class="eval-dir">${esc(p.direction)} · coefficient ${p.coefficient}</span></td>
+      <td class="acc">${accCell(p.accuracy, p.ci_low, p.ci_high)}</td>
+      <td class="n">${p.n}</td>`;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderSummary(s) {
+  document.getElementById("summary-card").classList.remove("hidden");
+  const stats = document.getElementById("stats");
+  stats.innerHTML = "";
+  const items = [
+    [s.total_input, "input"],
+    [s.total_passed, "passed", true],
+    [s.total_rejected, "rejected"],
+    [(s.pass_rate * 100).toFixed(1) + "%", "pass rate", true],
+    [s.avg_constituent_count, "avg constituents"],
+  ];
+  // Word-order constructions of the passed references (paper Table 1).  OSV is
+  // DOSV + IOSV; older summary.json files lack the key, so the tiles are
+  // skipped rather than showing NaN.
+  const wo = s.word_order_distribution;
+  if (wo) {
+    const dosv = wo.DOSV || 0, iosv = wo.IOSV || 0;
+    items.push([wo.SOV || 0, "SOV (canonical)"]);
+    items.push([dosv + iosv, `OSV · DOSV ${dosv} / IOSV ${iosv}`]);
+  }
+  for (const [v, k, accent] of items) {
+    const d = document.createElement("div");
+    d.className = "stat" + (accent ? " accent" : "");
+    d.innerHTML = `<div class="v">${v}</div><div class="k">${k}</div>`;
+    stats.appendChild(d);
+  }
+  const tbody = document.getElementById("filter-rows");
+  tbody.innerHTML = "";
+  const max = Math.max(1, ...s.filter_order.map(f => f.rejected));
+  for (const f of s.filter_order) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${f.filter}</td><td class="n">${f.rejected}</td>
+      <td><div class="bar"><i style="width:${(f.rejected / max) * 100}%"></i></div></td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function showError(msg) {
+  const note = document.getElementById("error-note");
+  note.textContent = msg;
+  note.classList.remove("hidden");
+}
+
+// ── Trees (dependency + constituency) for the single submitted sentence ──────
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Parse a CoNLL-U string into
+// [{text, tokens:[{id,idStr,word,lemma,upos,xpos,feats,head,headStr,deprel}],
+//   multis:[{id,word}]}].  Multiword-token ranges go to `multis`; empty nodes
+// (decimal ids) are skipped, as the RUG viewer does without a DEPS column.
+function parseConllu(text) {
+  const out = [];
+  for (const block of text.split(/\n\s*\n/)) {
+    if (!block.trim()) continue;
+    let sentText = "";
+    const tokens = [], multis = [];
+    for (const line of block.split("\n")) {
+      if (line.startsWith("# text")) {
+        const m = line.match(/#\s*text\s*=\s*(.*)$/);
+        if (m) sentText = m[1].trim();
+        continue;
+      }
+      if (line.startsWith("#") || !line.trim()) continue;
+      const c = line.split("\t").map(f => f.trim());
+      if (c.length < 8 || c[0].includes(".")) continue;
+      if (c[0].includes("-")) { multis.push({ id: c[0], word: c[1] }); continue; }
+      tokens.push({ id: parseInt(c[0], 10), idStr: c[0], word: c[1], lemma: c[2],
+                    upos: c[3], xpos: c[4], feats: c[5],
+                    head: parseInt(c[6], 10), headStr: c[6], deprel: c[7] });
+    }
+    if (tokens.length) {
+      if (!sentText) sentText = tokens.map(t => t.word).join(" ");
+      out.push({ text: sentText, tokens, multis });
+    }
+  }
+  return out;
+}
+
+// ── Dependency tree, drawn like the RUG CoNLL-U viewer ──────────────────────
+// A port of bin/conllu2svg.go from rug-compling/conllu-viewer
+// (https://github.com/rug-compling/conllu-viewer), the program behind
+// https://urd2.let.rug.nl/~kleiweg/conllu/ — same constants, node and edge
+// geometry, level allocation, anchor rule and FreeSans width tables, so the
+// tree matches that viewer's.  Basic dependencies only (Stanza writes no DEPS).
+// Go's sort.Slice is replaced by insertion sort, which is what Go runs for up
+// to 12 elements; longer sentences can break ties between equal-length arcs
+// differently.
+//
+// Copyright (c) 2018, Peter Kleiweg
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+// IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+// TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+// PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+// TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+const UD = {
+  FONT: "FreeSans, Arial, Helvetica, sans-serif",
+  MIN_NODE_WIDTH: 80, NODE_HEIGHT: 48, NODE_SPACING: 8, NODE_FONT_SIZE: 16, NODE_TWEEK: 2,
+  LVL_HEIGHT: 40, EDGE_FONT_SIZE: 16, EDGE_FONT_OFFSET: 8, EDGE_FONT_WHITE_MARGIN: 2,
+  EDGE_LBL_BACKGROUND: "white", EDGE_LBL_OPACITY: 0.9, EDGE_DROP: 80,
+  MULTI_SKIP: 4, MULTI_HEIGHT: 28, MARGIN: 4,
+};
+
+// Glyph widths from the viewer's bin/fontsize.go (FreeSans, units of
+// FONT_BASE_SIZE), for the three blocks Hindi text uses: Latin-1, Devanagari
+// and General Punctuation (incl. ZWJ/ZWNJ).
+const UD_FONT = (() => {
+  const seg = s => s.split(",").map(Number);
+  const blocks = (latin, deva, punct) =>
+    [[0x0000, seg(latin)], [0x0900, seg(deva)], [0x2000, seg(punct)]];
+  return {
+    BASE_SIZE: 134, ASCENT: 98, DESCENT: 29,
+    regular: blocks(
+      "107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,34,45,45,75,75,119,89,27,45,45,52,78,37,45,34,37,75,75,75,75,75,75,75,75,75,75,34,34,78,78,78,75,136,89,89,95,94,85,80,103,97,37,71,90,75,113,98,105,88,105,95,89,85,96,86,126,88,91,82,37,37,37,63,75,34,73,75,68,75,71,38,74,72,30,33,69,29,109,72,72,75,75,44,66,38,72,66,97,64,64,65,45,34,45,67,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,37,45,75,75,75,75,35,75,45,107,50,67,78,45,107,45,81,78,47,47,45,75,72,34,45,47,49,67,116,116,118,75,89,89,89,89,89,89,132,95,85,85,85,85,37,37,40,40,95,98,105,105,105,105,105,78,106,96,96,96,96,91,86,80,73,73,73,73,73,73,117,68,71,71,71,71,30,30,35,35,72,72,72,72,72,72,72,78,72,72,72,72,72,64,75,64",
+      "0,0,0,41,96,96,119,62,62,78,108,123,86,58,58,58,58,119,119,119,119,100,105,70,79,91,83,86,94,93,91,76,71,82,72,81,76,88,67,79,76,76,64,98,66,77,69,75,58,58,88,89,89,66,87,64,89,65,0,30,0,59,30,30,30,0,0,0,0,0,0,0,0,30,30,30,30,0,20,30,112,0,0,0,0,0,0,0,100,105,70,94,82,72,98,75,121,84,0,0,90,90,77,77,77,77,77,77,77,77,77,77,49,52,96,96,119,119,96,96,107,94,75,76,94,77,82,66",
+      "67,134,67,134,45,34,22,75,37,22,13,0,0,0,0,0,45,45,75,67,134,134,43,76,34,34,34,34,54,54,54,54,75,75,54,54,67,67,91,37,0,0,0,0,0,0,0,22,134,182,37,63,91,37,63,91,50,34,34,83,75,75,75,88,88,59,113,54,22,45,45,149,112,112,75,72,72,72,52,37,88,52,85,67,88,105,69,115,97,97,30,97,81,30,30,0,0,0,0,0,0,107,107,107,107,107,107,107,107,107,107,107"),
+    bold: blocks(
+      "107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,37,45,64,75,75,119,97,34,45,45,52,78,34,45,34,37,75,75,75,75,75,75,75,75,75,75,34,34,78,78,78,82,131,93,94,97,97,89,85,103,100,42,77,98,83,117,101,105,91,105,97,91,86,99,89,129,90,86,81,45,37,45,78,75,34,76,83,75,83,78,46,82,81,38,38,76,36,120,82,82,83,83,53,75,45,82,73,105,74,74,68,52,38,52,67,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,107,37,45,75,75,75,75,38,75,45,99,50,75,78,45,99,45,81,78,47,47,45,82,75,37,45,40,49,75,116,116,116,82,93,93,93,93,93,93,136,97,89,89,89,89,42,42,42,42,99,101,105,105,105,105,105,78,105,99,99,99,99,86,91,82,76,76,76,76,76,76,119,75,78,78,78,78,38,38,40,40,82,82,82,82,82,82,82,78,82,82,82,82,82,74,83,74",
+      "0,0,0,41,99,99,124,68,68,83,113,129,91,63,63,63,63,124,124,124,124,106,110,75,84,103,88,92,100,98,96,81,77,87,77,87,81,94,72,85,81,81,70,104,71,83,75,80,64,64,93,94,94,71,92,70,95,70,0,36,0,65,36,36,36,0,0,0,0,0,0,0,0,36,36,36,36,0,25,36,118,0,0,0,0,0,0,0,106,110,75,100,87,77,104,80,126,89,0,0,90,90,77,77,77,77,77,77,77,77,77,77,49,52,99,99,124,119,99,99,107,100,80,81,100,82,87,71",
+      "67,134,67,134,45,34,22,75,37,22,13,0,0,0,0,0,45,45,75,75,134,134,59,75,34,34,35,34,60,60,60,60,75,75,54,54,67,67,101,37,0,0,0,0,0,0,0,22,134,183,34,57,82,34,57,82,60,45,45,83,89,82,75,88,88,59,113,54,22,45,45,164,127,127,75,72,80,80,52,45,88,52,85,76,88,106,69,115,97,97,30,97,81,30,30,0,0,0,0,0,0,107,107,107,107,107,107,107,107,107,107,107"),
+  };
+})();
+
+// conllu2svg.go textwidth(): summed glyph widths, scaled and truncated like Go's int().
+// A code point outside the inlined blocks counts as the table's missing-glyph
+// width (107), or as the base size beyond the BMP, as in Go.
+function udTextWidth(text, fontsize, bold) {
+  const blocks = bold ? UD_FONT.bold : UD_FONT.regular;
+  let w = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+    const block = blocks.find(([lo, sizes]) => cp >= lo && cp < lo + sizes.length);
+    w += block ? block[1][cp - block[0]] : (cp > 0xFFFF ? UD_FONT.BASE_SIZE : 107);
+  }
+  return {
+    width: Math.trunc(fontsize * w / UD_FONT.BASE_SIZE),
+    height: Math.trunc(fontsize * (UD_FONT.ASCENT + UD_FONT.DESCENT) / UD_FONT.BASE_SIZE),
+    lift: Math.trunc(fontsize * UD_FONT.ASCENT / UD_FONT.BASE_SIZE),
+  };
+}
+
+// In-place insertion sort — Go's sort.Slice for up to 12 elements.
+function udSort(a, less) {
+  for (let i = 1; i < a.length; i++)
+    for (let j = i; j > 0 && less(a[j], a[j - 1]); j--) [a[j], a[j - 1]] = [a[j - 1], a[j]];
+}
+
+// conllu2svg.go doSentence(), basic dependencies: returns the SVG markup.
+function buildUDTreeSVG(sentence) {
+  const C = UD, items = sentence.tokens.map((t, k) => ({ ...t, end: k + 1 }));
+  if (!items.length) return '<div class="tree-msg">No parse available.</div>';
+  const positions = { "0": 0 };
+  items.forEach(it => { positions[it.idStr] = it.end; });
+
+  const deps = items.map(it => {
+    const headpos = positions[it.headStr];
+    if (headpos === undefined) throw new Error(`Unknown head position ${it.headStr}`);
+    return { end: it.end, headpos, rel: it.deprel, dist: Math.abs(it.end - headpos), lvl: 0 };
+  });
+
+  // node positions
+  let width = C.MARGIN;
+  for (const it of items) {
+    it.x1 = width;
+    const w1 = udTextWidth(it.upos + " i", C.NODE_FONT_SIZE, false).width;
+    const w2 = udTextWidth(it.word + " i", C.NODE_FONT_SIZE, false).width;
+    it.x2 = width + 24 + Math.max(C.MIN_NODE_WIDTH, w1, w2);
+    width = it.x2 + C.NODE_SPACING;
+  }
+  width += C.MARGIN - C.NODE_SPACING;
+
+  // edge levels and anchor points
+  const anchors = items.map(() => []);
+  udSort(deps, (a, b) => a.dist < b.dist);
+  const grid = items.map(() => new Array(2 * items.length).fill(false));
+  for (const dep of deps) {
+    if (dep.headpos === 0) { anchors[dep.end - 1].push({ dist: 0, level: 0 }); continue; }
+    let i1 = dep.end - 1, i2 = dep.headpos - 1;
+    if (i1 > i2) [i1, i2] = [i2, i1];
+    let lvl = 0;
+    for (;;) {
+      let ok = true;
+      for (let i = i1; i < i2; i++) if (grid[i][lvl]) { ok = false; break; }
+      if (ok) { for (let i = i1; i < i2; i++) grid[i][lvl] = true; break; }
+      lvl++;
+    }
+    dep.lvl = lvl;
+    anchors[dep.end - 1].push({ dist: dep.headpos - dep.end, level: lvl });
+    anchors[dep.headpos - 1].push({ dist: dep.end - dep.headpos, level: lvl });
+  }
+  const maxlvl = Math.max(0, ...deps.map(d => d.lvl));
+  // root dependencies sit on the top level
+  for (const dep of deps) if (dep.headpos === 0) dep.lvl = maxlvl;
+  for (const list of anchors) for (const a of list) if (a.dist === 0) a.level = maxlvl;
+  for (const list of anchors) udSort(list, (a1, a2) => {
+    if (a1.dist === 0) return a2.dist > 0;
+    if (a2.dist === 0) return a1.dist < 0;
+    if (a1.dist === a2.dist) return a1.dist < 0 ? a1.level < a2.level : a1.level > a2.level;
+    if (a1.dist < 0) return a2.dist > 0 || a1.dist >= a2.dist;
+    if (a2.dist < 0) return false;
+    return a1.dist >= a2.dist;
+  });
+  const anchor = (i1, i2, lvl) => {
+    const a = anchors[i1];
+    if (a.length === 1) return i1 < i2 ? 0.75 : 0.25;
+    let n = 0;
+    for (let i = 0; i < a.length; i++) if (a[i].dist === i2 - i1 && a[i].level === lvl) { n = i; break; }
+    return (n + 0.5) / a.length;
+  };
+
+  const top = C.MARGIN + C.EDGE_FONT_SIZE + C.EDGE_FONT_OFFSET;
+  let height = top + C.LVL_HEIGHT * (maxlvl + 1) + C.NODE_HEIGHT + C.MARGIN;
+  if (sentence.multis && sentence.multis.length) height += C.MULTI_HEIGHT + C.MULTI_SKIP;
+
+  // edges
+  let lines = "", arrows = "", whites = "", texts = "";
+  for (const dep of deps) {
+    const i1 = dep.end - 1, i2 = dep.headpos === 0 ? i1 : dep.headpos - 1;
+    const x1 = items[i1].x1 + 10 + Math.trunc((items[i1].x2 - items[i1].x1 - 20) * anchor(i1, i2, dep.lvl));
+    const x2 = items[i2].x1 + 10 + Math.trunc((items[i2].x2 - items[i2].x1 - 20) * anchor(i2, i1, dep.lvl));
+    const y1 = top + C.LVL_HEIGHT * (maxlvl + 1);
+    let y2 = top + C.LVL_HEIGHT * (maxlvl - dep.lvl);
+    const cls = `en${dep.end} en${dep.headpos} q${dep.end}q${dep.headpos}`;
+    if (dep.headpos === 0) {
+      y2 = top;
+      lines += `<path class="en${dep.end} q${dep.end}q${dep.headpos}" d="M${x1} ${y1} L${x1} ${y2}" />\n`;
+    } else {
+      const mid = Math.trunc((x1 + x2) / 2), drop = y2 + C.EDGE_DROP;
+      lines += `<path class="${cls}" d="M${x1} ${y1} L${x1} ${drop} C${x1} ${y2} ${x1} ${y2} ${mid} ${y2} C${x2} ${y2} ${x2} ${y2} ${x2} ${drop} L${x2} ${y1}" />\n`;
+    }
+    arrows += `<path class="${cls}" d="M${x1} ${y1} l3 -14 l-6 0 Z" />\n`;
+    const m = udTextWidth(dep.rel + "i", C.EDGE_FONT_SIZE, true);
+    whites += `<rect x="${Math.trunc((x1 + x2 - m.width) / 2) - C.EDGE_FONT_WHITE_MARGIN}" y="${y2 - m.lift - C.EDGE_FONT_OFFSET - C.EDGE_FONT_WHITE_MARGIN}" width="${m.width + 2 * C.EDGE_FONT_WHITE_MARGIN}" height="${m.height + 2 * C.EDGE_FONT_WHITE_MARGIN}" />\n`;
+    texts += `<text class="ln${dep.end} ln${dep.headpos} p${dep.end}p${dep.headpos}" x="${Math.trunc((x1 + x2) / 2)}" y="${y2 - C.EDGE_FONT_OFFSET}" data-edge="${dep.end},${dep.headpos}">${esc(dep.rel)}</text>\n`;
+  }
+  let svg = `<svg class="ud-tree" xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">\n`;
+  svg += `<g class="normal">\n`
+    + `<g fill="none" stroke="black" stroke-width="1">\n${lines}</g>\n`
+    + `<g fill="black" stroke-width="1" stroke="black">\n${arrows}</g>\n`
+    + `<g fill="${C.EDGE_LBL_BACKGROUND}" stroke="${C.EDGE_LBL_BACKGROUND}" stroke-width="1" opacity="${C.EDGE_LBL_OPACITY}">\n${whites}</g>\n`
+    + `<g font-family="${C.FONT}" font-size="${C.EDGE_FONT_SIZE}" text-anchor="middle">\n${texts}</g>\n`
+    + `</g>\n`;
+
+  // nodes
+  const offset = top + C.LVL_HEIGHT * (maxlvl + 1);
+  const connected = n => {          // classlbl(): "en<k>" for every node sharing an edge with n
+    const uses = new Set();
+    for (const d of deps) if (d.end === n || d.headpos === n) { uses.add(d.end); uses.add(d.headpos); }
+    return [...uses].map(u => `en${u}`).join(" ");
+  };
+  const lower = Math.trunc(udTextWidth("Xg", C.NODE_FONT_SIZE, false).lift / 2);
+  const fontAttrs = `font-family="${C.FONT}" font-size="${C.NODE_FONT_SIZE}" text-anchor="middle"`;
+  let rects = "", pos = "", words = "", hits = "";
+  items.forEach((it, i) => {
+    const cx = Math.trunc((it.x1 + it.x2) / 2), w = it.x2 - it.x1;
+    rects += `<rect class="q${i + 1} ${connected(it.end)}" x="${it.x1}" y="${offset}" width="${w}" height="${C.NODE_HEIGHT}" rx="5" ry="5" />\n`;
+    pos += `<text x="${cx}" y="${offset + C.NODE_TWEEK + C.NODE_HEIGHT / 4 + lower}">${esc(it.upos)}</text>\n`;
+    words += `<text x="${cx}" y="${offset - C.NODE_TWEEK + C.NODE_HEIGHT * 3 / 4 + lower}">${esc(it.word)}</text>\n`;
+    const feats = it.feats === "_" ? "" : it.feats.replace(/\|/g, ", ").replace(/=/g, ": ");
+    const tip = `${esc(it.idStr)}: <em>${esc(it.word)}</em><br>\n${esc(it.upos)}<br>\n${esc(feats)}<br>\nLemma: ${esc(it.lemma)}`
+      + (it.xpos === "_" ? "" : `<br>\nXpos: ${esc(it.xpos)}`);
+    hits += `<rect x="${it.x1}" y="${offset}" width="${w}" height="${C.NODE_HEIGHT}" rx="5" ry="5" data-node="${i + 1}" data-tip="${esc(tip)}" />\n`;
+  });
+  svg += `<g fill="#D0E0FF" stroke="black" stroke-width="1">\n${rects}</g>\n`
+    + `<g ${fontAttrs}>\n${pos}</g>\n`
+    + `<g ${fontAttrs} font-style="italic">\n${words}</g>\n`
+    + `<g opacity="0" stroke-width="1">\n${hits}</g>\n`;
+
+  // multiword tokens, in a row under the words
+  let boxes = "", labels = "";
+  for (const multi of sentence.multis || []) {
+    const [from, to] = multi.id.split("-");
+    const a = items.find(it => it.idStr === from), b = items.find(it => it.idStr === to);
+    if (!a || !b) continue;
+    const y = offset + C.NODE_HEIGHT + C.MULTI_SKIP;
+    boxes += `<rect x="${a.x1}" y="${y}" width="${b.x2 - a.x1}" height="${C.MULTI_HEIGHT}" rx="5" ry="5" />\n`;
+    labels += `<text x="${Math.trunc((a.x1 + b.x2) / 2)}" y="${y + C.MULTI_HEIGHT / 2 + lower}">${esc(multi.word)}</text>\n`;
+  }
+  svg += `<g fill="#D0E0FF" stroke="black" stroke-width="1">\n${boxes}</g>\n`
+    + `<g font-family="${C.FONT}" font-size="${C.NODE_FONT_SIZE}" font-style="italic" text-anchor="middle">\n${labels}</g>\n`;
+  return svg + "</svg>";
+}
+
+// The viewer's hover/click behaviour (mark/unmark, mrk/unmrk, hold/hld in
+// conllu2svg.go): hovering a word highlights its edges and neighbouring nodes
+// and shows a tooltip; hovering a label highlights that edge and its two
+// nodes; a click holds the highlight until the next click.  Delegated from the
+// tree containers, so it also works on the copy in the expand overlay.
+const udTip = document.createElement("div");
+udTip.id = "ud-tt";
+document.body.appendChild(udTip);
+document.addEventListener("mousemove", e => {
+  if (udTip.style.display !== "block") return;
+  udTip.style.top = Math.max(10, e.clientY + 24) + "px";
+  if (innerWidth > 500 && e.clientX + 500 > innerWidth) {
+    udTip.style.right = (innerWidth - e.clientX - 3 + 10) + "px"; udTip.style.left = "auto";
+  } else {
+    udTip.style.left = (e.clientX + 3 + 10) + "px"; udTip.style.right = "auto";
+  }
+});
+const udHold = { on: false, svg: null, node: null, edge: null };
+const UD_TEXT_ON = { fill: "blue", fontWeight: "bold" }, UD_TEXT_OFF = { fill: "", fontWeight: "" };
+const UD_LINE_ON = { stroke: "blue", strokeWidth: "3" }, UD_LINE_OFF = { stroke: "", strokeWidth: "" };
+const udStyle = (svg, sel, style) => svg.querySelectorAll(sel).forEach(el => Object.assign(el.style, style));
+
+function udMark(svg, i, tip) {
+  udTip.innerHTML = tip; udTip.style.display = "block"; udTip.style.opacity = ".95";
+  if (!udHold.on) { udStyle(svg, `.ln${i}`, UD_TEXT_ON); udStyle(svg, `.en${i}`, UD_LINE_ON); }
+}
+function udUnmark(svg, i) {
+  udTip.style.display = "none"; udTip.style.opacity = "0";
+  if (!udHold.on) { udStyle(svg, `.ln${i}`, UD_TEXT_OFF); udStyle(svg, `.en${i}`, UD_LINE_OFF); }
+}
+function udMrk(svg, i, j, on) {
+  if (udHold.on) return;
+  udStyle(svg, `.p${i}p${j}`, on ? UD_TEXT_ON : UD_TEXT_OFF);
+  udStyle(svg, `.q${i}q${j}, .q${i}, .q${j}`, on ? UD_LINE_ON : UD_LINE_OFF);
+}
+function udUnhold() {
+  if (!udHold.on) return;
+  udHold.on = false;
+  if (udHold.node) udUnmark(udHold.svg, udHold.node);
+  if (udHold.edge) udMrk(udHold.svg, udHold.edge[0], udHold.edge[1], false);
+  Object.assign(udHold, { svg: null, node: null, edge: null });
+}
+function udEvent(e) {
+  const el = e.target.closest && e.target.closest("[data-node], [data-edge]");
+  const svg = el && el.closest("svg.ud-tree");
+  if (!svg) return;
+  const node = el.dataset.node, edge = el.dataset.edge && el.dataset.edge.split(",");
+  if (e.type === "mouseover") node ? udMark(svg, node, el.dataset.tip) : udMrk(svg, edge[0], edge[1], true);
+  else if (e.type === "mouseout") node ? udUnmark(svg, node) : udMrk(svg, edge[0], edge[1], false);
+  else if (node) {
+    const same = udHold.on && udHold.svg === svg && udHold.node === node;
+    udUnhold();
+    if (!same) { udMark(svg, node, el.dataset.tip); Object.assign(udHold, { on: true, svg, node }); }
+  } else {
+    const same = udHold.on && udHold.svg === svg && udHold.edge && udHold.edge.join() === edge.join();
+    udUnhold();
+    if (!same) { udMrk(svg, edge[0], edge[1], true); Object.assign(udHold, { on: true, svg, edge }); }
+  }
+}
+for (const id of ["dep-tree", "tree-overlay-body"])
+  for (const type of ["mouseover", "mouseout", "click"])
+    document.getElementById(id).addEventListener(type, udEvent);
+
+// Bracketed constituency tree → SVG (adapted from taru_viewer.html; tree-only).
+function parseTree(str) {
+  const s = str.trim(); let i = 0; const ws = c => /\s/.test(c);
+  const skip = () => { while (i < s.length && ws(s[i])) i++; };
+  function node() {
+    skip(); if (s[i] !== "(") throw new Error("Expected '(' at " + i); i++; skip();
+    let label = ""; while (i < s.length && !ws(s[i]) && s[i] !== "(" && s[i] !== ")") label += s[i++];
+    const nd = { label, children: [], word: null }; skip();
+    while (i < s.length && s[i] !== ")") {
+      if (s[i] === "(") nd.children.push(node());
+      else { let w = ""; while (i < s.length && !ws(s[i]) && s[i] !== "(" && s[i] !== ")") w += s[i++]; nd.word = nd.word ? nd.word + " " + w : w; }
+      skip();
+    }
+    if (s[i] !== ")") throw new Error("Expected ')' near " + i); i++; return nd;
+  }
+  return node();
+}
+const _isPre = n => n.children.length === 0 && n.word !== null;
+const _mctx = document.createElement("canvas").getContext("2d");
+const _measure = (t, f) => { _mctx.font = f; return _mctx.measureText(t).width; };
+function buildConstituencySVG(root) {
+  const LAB = '600 15px "IBM Plex Mono",monospace', WD = '500 19px "Noto Sans Devanagari",serif';
+  const LEVEL = 60, WGAP = 40, SGAP = 6, PAD = 14, MX = 22, MY = 26;
+  let maxD = 0;
+  (function w(n, d) {
+    maxD = Math.max(maxD, d);
+    if (_isPre(n)) n.width = Math.max(_measure(n.label, LAB), _measure(n.word, WD)) + PAD * 2;
+    else { let s = 0; for (const ch of n.children) s += w(ch, d + 1); n.width = Math.max(s, _measure(n.label, LAB) + PAD * 2); }
+    return n.width;
+  })(root, 0);
+  (function p(n, left, d) {
+    n.y = MY + d * LEVEL;
+    if (_isPre(n)) n.x = left + n.width / 2;
+    else {
+      const tot = n.children.reduce((a, c) => a + c.width, 0);
+      let cur = left + Math.max(0, (n.width - tot) / 2);
+      for (const ch of n.children) { p(ch, cur, d + 1); cur += ch.width; }
+      n.x = (n.children[0].x + n.children[n.children.length - 1].x) / 2;
+    }
+  })(root, 0, 0);
+  const W = root.width + MX * 2, H = MY + maxD * LEVEL + WGAP + SGAP + MY;
+  const NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("xmlns", NS); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  const st = document.createElementNS(NS, "style");
+  st.textContent = '.nt{font-family:"IBM Plex Mono",monospace;font-weight:600;fill:#211d17}.pos{font-family:"IBM Plex Mono",monospace;font-weight:600;fill:#27645f}.wd{font-family:"Noto Sans Devanagari",serif;font-weight:500;fill:#211d17}.edge{stroke:#b9ad96;stroke-width:1.4;fill:none}';
+  svg.appendChild(st);
+  const el = (t, a) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const txt = (x, y, c, s) => { const t = el("text", { x: x + MX, y, "text-anchor": "middle", class: c }); t.textContent = s; return t; };
+  (function draw(n) {
+    svg.appendChild(txt(n.x, n.y, _isPre(n) ? "pos" : "nt", n.label));
+    if (_isPre(n)) {
+      const wy = n.y + WGAP;
+      svg.appendChild(el("line", { x1: n.x + MX, y1: n.y + 6, x2: n.x + MX, y2: wy - 15, class: "edge" }));
+      svg.appendChild(txt(n.x, wy, "wd", n.word));
+    } else for (const ch of n.children) {
+      svg.appendChild(el("line", { x1: n.x + MX, y1: n.y + 6, x2: ch.x + MX, y2: ch.y - 15, class: "edge" }));
+      draw(ch);
+    }
+  })(root);
+  return svg;
+}
+
+async function renderTrees(jobId) {
+  const treesEl = document.getElementById("trees");
+  const depEl = document.getElementById("dep-tree");
+  const conEl = document.getElementById("con-tree");
+  treesEl.classList.remove("hidden");
+  depEl.innerHTML = '<div class="tree-msg">Loading…</div>';
+  conEl.innerHTML = '<div class="tree-msg">Parsing constituency tree…</div>';
+
+  let sentences;
+  try {
+    const res = await fetch(`/api/jobs/${jobId}/files/parsed.conllu`);
+    if (!res.ok) throw new Error();
+    sentences = parseConllu(await res.text());
+  } catch {
+    depEl.innerHTML = '<div class="tree-msg err">Could not load the parse.</div>';
+    conEl.innerHTML = "";
+    return;
+  }
+  if (!sentences.length) {
+    depEl.innerHTML = '<div class="tree-msg">No sentence to show.</div>';
+    conEl.innerHTML = "";
+    return;
+  }
+  const first = sentences[0];
+
+  udUnhold();
+  try { depEl.innerHTML = buildUDTreeSVG(first); }
+  catch { depEl.innerHTML = '<div class="tree-msg err">Could not draw the dependency tree.</div>'; }
+
+  try {
+    const res = await fetch("/taru/parse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sentence: first.text, surprisal: false }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "parse failed");
+    const treeStr = (Array.isArray(data) ? data[0] : data).tree;
+    if (!treeStr) throw new Error("no tree returned");
+    conEl.innerHTML = "";
+    conEl.appendChild(buildConstituencySVG(parseTree(treeStr)));
+  } catch (e) {
+    conEl.innerHTML = `<div class="tree-msg err">Constituency tree unavailable (${esc(e.message)}). The Berkeley parser (Java) may not be available here.</div>`;
+  }
+}
+
+// ── Per-tree expand overlay ──────────────────────────────────────────────────
+document.getElementById("trees").addEventListener("click", e => {
+  const btn = e.target.closest(".tree-expand");
+  if (btn) openTreeOverlay(btn.dataset.tree);
+});
+document.getElementById("tree-overlay-close").addEventListener("click", closeTreeOverlay);
+document.getElementById("tree-overlay").addEventListener("click", e => {
+  if (e.target.id === "tree-overlay") closeTreeOverlay();
+});
+
+function openTreeOverlay(which) {
+  const src = document.getElementById(which === "dep" ? "dep-tree" : "con-tree");
+  const svg = src.querySelector("svg");
+  const body = document.getElementById("tree-overlay-body");
+  body.innerHTML = "";
+  document.getElementById("tree-overlay-title").textContent =
+    which === "dep" ? "Dependency tree" : "Constituency tree";
+  if (svg) {
+    const clone = svg.cloneNode(true);
+    const w = parseFloat(svg.getAttribute("width")) || 0;
+    const h = parseFloat(svg.getAttribute("height")) || 0;
+    if (w && h) { clone.setAttribute("width", w * 1.6); clone.setAttribute("height", h * 1.6); }
+    body.appendChild(clone);
+  } else {
+    body.innerHTML = '<div class="tree-msg">No tree to show.</div>';
+  }
+  document.getElementById("tree-overlay").classList.remove("hidden");
+}
+function closeTreeOverlay() {
+  document.getElementById("tree-overlay").classList.add("hidden");
+  document.getElementById("tree-overlay-body").innerHTML = "";
+}
+</script>
+</body>
+</html>

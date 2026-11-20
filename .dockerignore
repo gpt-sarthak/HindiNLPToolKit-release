@@ -1,0 +1,24 @@
+# Only what the web app needs at runtime goes into the image.
+.git
+.venv
+venv
+**/__pycache__
+*.pyc
+*.log
+**/.DS_Store
+.vscode
+.idea
+
+# Not needed at runtime (the image serves uploads; it does not ship corpora,
+# tests, training code or infrastructure)
+data
+tests
+training
+reproducibility
+deploy
+
+# Runtime scratch / build outputs
+webapp/outputs
+taru/workspace/results
+taru/workspace/genmodel/custom
+taru/workspace/bin
