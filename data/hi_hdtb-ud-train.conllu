@@ -1,0 +1,120 @@
+# sent_id = train-s1
+# text = यह एशिया की सबसे बड़ी मस्जिदों में से एक है ।
+# translit = yaha eśiyā kī sabase baṛī masjidoṁ meṁ se eka hai .
+1	यह	यह	DET	DEM	Case=Nom|Number=Sing|Person=3|PronType=Dem	2	det	_	ChunkId=NP|ChunkType=child|LTranslit=yaha|Translit=yaha
+2	एशिया	एशिया	PROPN	NNP	Case=Acc|Gender=Masc|Number=Sing|Person=3	6	nmod	_	ChunkId=NP|ChunkType=head|LTranslit=eśiyā|Tam=0|Translit=eśiyā|Vib=0_का
+3	की	का	ADP	PSP	AdpType=Post|Case=Acc|Gender=Fem|Number=Plur	2	case	_	ChunkId=NP|ChunkType=child|LTranslit=kā|Translit=kī
+4	सबसे	सबसे	ADV	INTF	AdvType=Deg	5	advmod	_	AltTag=avy-ADV|ChunkId=NP2|ChunkType=child|LTranslit=sabase|Translit=sabase
+5	बड़ी	बड़ा	ADJ	JJ	Case=Acc|Gender=Fem|Number=Plur	6	amod	_	ChunkId=NP2|ChunkType=child|LTranslit=baṛā|Translit=baṛī
+6	मस्जिदों	मस्जिद	NOUN	NN	Case=Acc|Gender=Fem|Number=Plur|Person=3	9	nmod	_	ChunkId=NP2|ChunkType=head|LTranslit=masjida|Tam=0|Translit=masjidoṁ|Vib=0_में_से
+7	में	में	ADP	PSP	AdpType=Post	6	case	_	ChunkId=NP2|ChunkType=child|LTranslit=meṁ|Translit=meṁ
+8	से	से	ADP	PSP	AdpType=Post	6	case	_	ChunkId=NP2|ChunkType=child|LTranslit=se|Translit=se
+9	एक	एक	NUM	QC	NumType=Card	0	root	_	ChunkId=NP3|ChunkType=head|CxnElt=10:Existential-CopPred.Pivot|LTranslit=eka|Translit=eka
+10	है	है	AUX	VM	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin|Voice=Act	9	cop	_	ChunkId=VGF|ChunkType=head|Cxn=Existential-CopPred|LTranslit=hai|Stype=declarative|Tam=hE|Translit=hai|Vib=है
+11	।	।	PUNCT	SYM	_	9	punct	_	ChunkId=BLK|ChunkType=head|LTranslit=.|Translit=.
+
+# sent_id = train-s2
+# text = इसे नवाब शाहजेहन ने बनवाया था ।
+# translit = ise navāba śāhajehana ne banavāyā thā .
+1	इसे	यह	PRON	PRP	Case=Acc,Dat|Number=Sing|Person=3|PronType=Prs	5	obj	_	ChunkId=NP|ChunkType=head|LTranslit=yaha|Tam=ko|Translit=ise|Vib=को
+2	नवाब	नवाब	NOUN	NNC	Case=Nom|Gender=Masc|Number=Sing|Person=3	3	compound	_	ChunkId=NP2|ChunkType=child|LTranslit=navāba|Tam=0|Translit=navāba|Vib=0
+3	शाहजेहन	शाहजेहन	PROPN	NNP	Case=Acc|Gender=Masc|Number=Sing|Person=3	5	nsubj	_	ChunkId=NP2|ChunkType=head|LTranslit=śāhajehana|Tam=0|Translit=śāhajehana|Vib=0_ने
+4	ने	ने	ADP	PSP	AdpType=Post	3	case	_	ChunkId=NP2|ChunkType=child|LTranslit=ne|Translit=ne
+5	बनवाया	बनवाना	VERB	VM	Aspect=Perf|Gender=Masc|Number=Sing|VerbForm=Part|Voice=Act	0	root	_	ChunkId=VGF|ChunkType=head|LTranslit=banavānā|Stype=declarative|Tam=yA|Translit=banavāyā|Vib=या_था
+6	था	था	AUX	VAUX	Gender=Masc|Mood=Ind|Number=Sing|Tense=Past|VerbForm=Fin	5	aux	_	ChunkId=VGF|ChunkType=child|LTranslit=thā|Tam=WA|Translit=thā|Vib=था
+7	।	।	PUNCT	SYM	_	5	punct	_	ChunkId=BLK|ChunkType=head|LTranslit=.|Translit=.
+
+# sent_id = train-s3
+# text = इसका प्रवेश द्वार दो मंजिला है ।
+# translit = isakā praveśa dvāra do maṁjilā hai .
+1	इसका	यह	PRON	PRP	Case=Acc,Gen|Gender=Masc|Number=Sing|Person=3|Poss=Yes|PronType=Prs	3	nmod	_	ChunkId=NP|ChunkType=head|LTranslit=yaha|Tam=kA|Translit=isakā|Vib=का
+2	प्रवेश	प्रवेश	NOUN	NNC	Case=Nom|Gender=Masc|Number=Sing|Person=3	3	compound	_	ChunkId=NP2|ChunkType=child|LTranslit=praveśa|Tam=0|Translit=praveśa|Vib=0
+3	द्वार	द्वार	NOUN	NN	Case=Nom|Gender=Masc|Number=Sing|Person=3	5	nsubj	_	ChunkId=NP2|ChunkType=head|LTranslit=dvāra|Tam=0|Translit=dvāra|Vib=0
+4	दो	दो	NUM	QC	NumType=Card	5	nummod	_	ChunkId=JJP|ChunkType=child|LTranslit=do|Translit=do
+5	मंजिला	मंजिला	ADJ	JJ	_	0	root	_	ChunkId=JJP|ChunkType=head|LTranslit=maṁjilā|Translit=maṁjilā
+6	है	है	AUX	VM	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin|Voice=Act	5	cop	_	ChunkId=VGF|ChunkType=head|LTranslit=hai|Stype=declarative|Tam=hE|Translit=hai|Vib=है
+7	।	।	PUNCT	SYM	_	5	punct	_	ChunkId=BLK|ChunkType=head|LTranslit=.|Translit=.
+
+# sent_id = train-s4
+# text = जिसमें चार मेहराबें हैं और मुख्य प्रार्थना हॉल में जाने के लिए 9 प्रवेश द्वार हैं ।
+# translit = jisameṁ cāra meharābeṁ haiṁ aura mukhya prārthanā hôla meṁ jāne ke lie 9 praveśa dvāra haiṁ .
+1	जिसमें	जो	PRON	PRP	Case=Acc,Ine|Number=Sing|Person=3|PronType=Prs	3	nmod	_	ChunkId=NP|ChunkType=head|LTranslit=jo|Tam=meM|Translit=jisameṁ|Vib=में
+2	चार	चार	NUM	QC	NumType=Card	3	nummod	_	ChunkId=NP2|ChunkType=child|LTranslit=cāra|Translit=cāra
+3	मेहराबें	मेहराब	NOUN	NN	Case=Nom|Gender=Fem|Number=Plur|Person=3	0	root	_	ChunkId=NP2|ChunkType=head|CxnElt=4:Existential-CopPred.Pivot|LTranslit=meharāba|Tam=0|Translit=meharābeṁ|Vib=0
+4	हैं	है	AUX	VM	Mood=Ind|Number=Plur|Person=3|Tense=Pres|VerbForm=Fin|Voice=Act	3	cop	_	ChunkId=VGF|ChunkType=head|Cxn=Existential-CopPred|LTranslit=hai|Stype=declarative|Tam=hE|Translit=haiṁ|Vib=है
+5	और	और	CCONJ	CC	_	16	cc	_	ChunkId=CCP|ChunkType=head|LTranslit=aura|Translit=aura
+6	मुख्य	मुख्य	ADJ	JJ	Case=Acc	8	amod	_	ChunkId=NP3|ChunkType=child|LTranslit=mukhya|Translit=mukhya
+7	प्रार्थना	प्रार्थना	NOUN	NNC	Case=Nom|Gender=Fem|Number=Sing|Person=3	8	compound	_	ChunkId=NP3|ChunkType=child|LTranslit=prārthanā|Tam=0|Translit=prārthanā|Vib=0
+8	हॉल	हॉल	NOUN	NN	Case=Acc|Gender=Masc|Number=Sing|Person=3	16	obl	_	ChunkId=NP3|ChunkType=head|LTranslit=hôla|Tam=0|Translit=hôla|Vib=0_में
+9	में	में	ADP	PSP	AdpType=Post	8	case	_	ChunkId=NP3|ChunkType=child|LTranslit=meṁ|Translit=meṁ
+10	जाने	जाना	VERB	VM	Case=Acc|VerbForm=Inf	16	advcl	_	ChunkId=VGNN|ChunkType=head|LTranslit=jānā|Tam=nA|Translit=jāne|Vib=ना_के_लिए
+11	के	के	ADP	PSP	AdpType=Post	10	mark	_	ChunkId=VGNN|ChunkType=child|LTranslit=ke|Translit=ke
+12	लिए	लिए	ADP	PSP	AdpType=Post	10	mark	_	ChunkId=VGNN|ChunkType=child|LTranslit=lie|Translit=lie
+13	9	9	NUM	QC	NumType=Card	15	nummod	_	ChunkId=NP4|ChunkType=child|LTranslit=9|Translit=9
+14	प्रवेश	प्रवेश	NOUN	NNC	Case=Nom|Gender=Masc|Number=Sing|Person=3	15	compound	_	ChunkId=NP4|ChunkType=child|LTranslit=praveśa|Tam=0|Translit=praveśa|Vib=0
+15	द्वार	द्वार	NOUN	NN	Case=Nom|Gender=Masc|Number=Plur|Person=3	16	nsubj	_	ChunkId=NP4|ChunkType=head|LTranslit=dvāra|Tam=0|Translit=dvāra|Vib=0
+16	हैं	है	VERB	VM	Mood=Ind|Number=Plur|Person=3|Tense=Pres|VerbForm=Fin|Voice=Act	3	conj	_	ChunkId=VGF2|ChunkType=head|LTranslit=hai|Stype=declarative|Tam=hE|Translit=haiṁ|Vib=है
+17	।	।	PUNCT	SYM	_	3	punct	_	ChunkId=BLK|ChunkType=head|LTranslit=.|Translit=.
+
+# sent_id = train-s5
+# text = पूरी इमारत बेहद खूबसूरत है ।
+# translit = pūrī imārata behada khūbasūrata hai .
+1	पूरी	पूरा	ADJ	JJ	Case=Nom|Gender=Fem|Number=Sing	2	amod	_	ChunkId=NP|ChunkType=child|LTranslit=pūrā|Translit=pūrī
+2	इमारत	इमारत	NOUN	NN	Case=Nom|Gender=Fem|Number=Sing|Person=3	4	nsubj	_	ChunkId=NP|ChunkType=head|LTranslit=imārata|Tam=0|Translit=imārata|Vib=0
+3	बेहद	बेहद	ADV	INTF	AdvType=Deg	4	advmod	_	AltTag=avy-ADV|ChunkId=JJP|ChunkType=child|LTranslit=behada|Translit=behada
+4	खूबसूरत	खूबसूरत	ADJ	JJ	_	0	root	_	ChunkId=JJP|ChunkType=head|LTranslit=khūbasūrata|Translit=khūbasūrata
+5	है	है	AUX	VM	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin|Voice=Act	4	cop	_	ChunkId=VGF|ChunkType=head|LTranslit=hai|Stype=declarative|Tam=hE|Translit=hai|Vib=है
+6	।	।	PUNCT	SYM	_	4	punct	_	ChunkId=BLK|ChunkType=head|LTranslit=.|Translit=.
+
+# sent_id = train-s6
+# text = यहाँ लगने वाला तीन दिन का इज्तिमा पूरे देश के लोगों को आमंत्रित करता है ।
+# translit = yahām̃ lagane vālā tīna dina kā ijtimā pūre deśa ke logoṁ ko āmaṁtrita karatā hai .
+1	यहाँ	यहाँ	PRON	PRP	Case=Nom|PronType=Prs	2	obl	_	ChunkId=NP|ChunkType=head|LTranslit=yahām̃|Translit=yahām̃
+2	लगने	लगना	VERB	VM	Case=Acc|Number=Sing|VerbForm=Inf	7	amod	_	ChunkId=VGNN|ChunkType=head|LTranslit=laganā|Tam=nA|Translit=lagane|Vib=ना_वाला
+3	वाला	वाला	ADJ	PSP	Case=Nom|Gender=Masc|Number=Sing	2	compound	_	ChunkId=VGNN|ChunkType=child|LTranslit=vālā|Translit=vālā
+4	तीन	तीन	NUM	QC	NumType=Card	5	nummod	_	ChunkId=NP2|ChunkType=child|LTranslit=tīna|Translit=tīna
+5	दिन	दिन	NOUN	NN	Case=Acc|Gender=Masc|Number=Sing|Person=3	7	nmod	_	ChunkId=NP2|ChunkType=head|LTranslit=dina|Tam=0|Translit=dina|Vib=0_का
+6	का	का	ADP	PSP	AdpType=Post|Case=Nom|Gender=Masc|Number=Sing	5	case	_	ChunkId=NP2|ChunkType=child|LTranslit=kā|Translit=kā
+7	इज्तिमा	इज्तिमा	NOUN	NN	Case=Nom|Gender=Masc|Number=Sing|Person=3	14	nsubj	_	ChunkId=NP3|ChunkType=head|LTranslit=ijtimā|Tam=0|Translit=ijtimā|Vib=0
+8	पूरे	पूरा	ADJ	JJ	Case=Acc|Gender=Masc|Number=Sing	9	amod	_	ChunkId=NP4|ChunkType=child|LTranslit=pūrā|Translit=pūre
+9	देश	देश	NOUN	NN	Case=Acc|Gender=Masc|Number=Sing|Person=3	11	nmod	_	ChunkId=NP4|ChunkType=head|LTranslit=deśa|Tam=0|Translit=deśa|Vib=0_का
+10	के	का	ADP	PSP	AdpType=Post|Case=Acc|Gender=Masc|Number=Plur	9	case	_	ChunkId=NP4|ChunkType=child|LTranslit=kā|Translit=ke
+11	लोगों	लोग	NOUN	NN	Case=Acc|Gender=Masc|Number=Plur|Person=3	14	obj	_	ChunkId=NP5|ChunkType=head|LTranslit=loga|Tam=0|Translit=logoṁ|Vib=0_को
+12	को	को	ADP	PSP	AdpType=Post	11	case	_	ChunkId=NP5|ChunkType=child|LTranslit=ko|Translit=ko
+13	आमंत्रित	आमंत्रित	ADJ	JJ	_	14	compound	_	ChunkId=JJP|ChunkType=head|LTranslit=āmaṁtrita|Translit=āmaṁtrita
+14	करता	करना	VERB	VM	Aspect=Imp|Gender=Masc|Number=Sing|Person=3|VerbForm=Part|Voice=Act	0	root	_	ChunkId=VGF|ChunkType=head|LTranslit=karanā|Stype=declarative|Tam=wA|Translit=karatā|Vib=ता_है
+15	है	है	AUX	VAUX	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	14	aux	_	ChunkId=VGF|ChunkType=child|LTranslit=hai|Tam=hE|Translit=hai|Vib=है
+16	।	।	PUNCT	SYM	_	14	punct	_	ChunkId=BLK|ChunkType=head|LTranslit=.|Translit=.
+
+# sent_id = train-s7
+# text = शौकत महल के सामने बड़ी झील के किनारे स्थित वास्तुकला का यह खूबसूरत नमूना कुदसिया बेगम के काल का है जिन्हें गोहर बेगम भी कहा जाता था ।
+# translit = śaukata mahala ke sāmane baṛī jhīla ke kināre sthita vāstukalā kā yaha khūbasūrata namūnā kudasiyā begama ke kāla kā hai jinheṁ gohara begama bhī kahā jātā thā .
+1	शौकत	शौकत	PROPN	NNPC	Case=Nom|Gender=Masc|Number=Sing|Person=3	2	compound	_	ChunkId=NP|ChunkType=child|LTranslit=śaukata|Tam=0|Translit=śaukata|Vib=0
+2	महल	महल	PROPN	NNP	Case=Acc|Gender=Masc|Number=Sing|Person=3	14	nmod	_	ChunkId=NP|ChunkType=head|LTranslit=mahala|Tam=0|Translit=mahala|Vib=0_के_सामने
+3	के	के	ADP	PSP	AdpType=Post	2	case	_	ChunkId=NP|ChunkType=child|LTranslit=ke|Translit=ke
+4	सामने	सामने	ADP	NST	AdpType=Post|Case=Nom|Gender=Masc|Number=Sing|Person=3	2	case	_	AltTag=ADP-NOUN|ChunkId=NP|ChunkType=child|LTranslit=sāmane|Translit=sāmane
+5	बड़ी	बड़ा	ADJ	JJ	Case=Acc|Gender=Fem|Number=Sing	6	amod	_	ChunkId=NP2|ChunkType=child|LTranslit=baṛā|Translit=baṛī
+6	झील	झील	NOUN	NN	Case=Acc|Gender=Fem|Number=Sing|Person=3	8	nmod	_	ChunkId=NP2|ChunkType=head|LTranslit=jhīla|Tam=0|Translit=jhīla|Vib=0_का
+7	के	का	ADP	PSP	AdpType=Post|Case=Acc|Gender=Masc|Number=Sing	6	case	_	ChunkId=NP2|ChunkType=child|LTranslit=kā|Translit=ke
+8	किनारे	किनारा	NOUN	NN	Case=Acc|Gender=Masc|Number=Sing|Person=3	9	obl	_	ChunkId=NP3|ChunkType=head|LTranslit=kinārā|Tam=0|Translit=kināre|Vib=0
+9	स्थित	स्थित	ADJ	JJ	Case=Acc	10	amod	_	ChunkId=JJP|ChunkType=head|LTranslit=sthita|Translit=sthita
+10	वास्तुकला	वास्तुकला	NOUN	NN	Case=Acc|Gender=Fem|Number=Sing|Person=3	14	nmod	_	ChunkId=NP4|ChunkType=head|LTranslit=vāstukalā|Tam=0|Translit=vāstukalā|Vib=0_का
+11	का	का	ADP	PSP	AdpType=Post|Case=Nom|Gender=Masc|Number=Sing	10	case	_	ChunkId=NP4|ChunkType=child|LTranslit=kā|Translit=kā
+12	यह	यह	DET	DEM	Case=Nom|Number=Sing|Person=3|PronType=Dem	14	det	_	ChunkId=NP5|ChunkType=child|LTranslit=yaha|Translit=yaha
+13	खूबसूरत	खूबसूरत	ADJ	JJ	Case=Nom	14	amod	_	ChunkId=NP5|ChunkType=child|LTranslit=khūbasūrata|Translit=khūbasūrata
+14	नमूना	नमूना	NOUN	NN	Case=Nom|Gender=Masc|Number=Sing|Person=3	0	root	_	ChunkId=NP5|ChunkType=head|CxnElt=20:Existential-CopPred.Pivot|LTranslit=namūnā|Tam=0|Translit=namūnā|Vib=0
+15	कुदसिया	कुदसिया	PROPN	NNPC	Case=Nom|Gender=Fem|Number=Sing|Person=3	16	compound	_	ChunkId=NP6|ChunkType=child|LTranslit=kudasiyā|Tam=0|Translit=kudasiyā|Vib=0
+16	बेगम	बेगम	PROPN	NNP	Case=Acc|Gender=Fem|Number=Sing|Person=3	18	nmod	_	ChunkId=NP6|ChunkType=head|LTranslit=begama|Tam=0|Translit=begama|Vib=0_का
+17	के	का	ADP	PSP	AdpType=Post|Case=Acc|Gender=Masc|Number=Sing	16	case	_	ChunkId=NP6|ChunkType=child|LTranslit=kā|Translit=ke
+18	काल	काल	NOUN	NN	Case=Acc|Gender=Masc|Number=Sing|Person=3	14	nmod	_	ChunkId=NP7|ChunkType=head|LTranslit=kāla|Tam=0|Translit=kāla|Vib=0_का
+19	का	का	ADP	PSP	AdpType=Post|Case=Nom|Gender=Masc|Number=Sing	18	case	_	ChunkId=NP7|ChunkType=child|LTranslit=kā|Translit=kā
+20	है	है	AUX	VM	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin|Voice=Act	14	cop	_	ChunkId=VGF|ChunkType=head|Cxn=Existential-CopPred|LTranslit=hai|Stype=declarative|Tam=hE|Translit=hai|Vib=है
+21	जिन्हें	जो	PRON	PRP	Case=Acc,Dat|Number=Sing|Person=3|Polite=Form|PronType=Prs	25	obj	_	ChunkId=NP8|ChunkType=head|LTranslit=jo|Tam=ko|Translit=jinheṁ|Vib=को
+22	गोहर	गोहर	PROPN	NNPC	Case=Nom|Gender=Fem|Number=Sing|Person=3	23	compound	_	ChunkId=NP9|ChunkType=child|LTranslit=gohara|Tam=0|Translit=gohara|Vib=0
+23	बेगम	बेगम	PROPN	NNP	Case=Nom|Gender=Fem|Number=Sing|Person=3	25	acl	_	ChunkId=NP9|ChunkType=head|LTranslit=begama|Tam=0|Translit=begama|Vib=0
+24	भी	भी	PART	RP	_	23	dep	_	ChunkId=NP9|ChunkType=child|LTranslit=bhī|Translit=bhī
+25	कहा	कहना	VERB	VM	Aspect=Perf|Gender=Masc|Number=Sing|VerbForm=Part|Voice=Act	16	acl:relcl	_	ChunkId=VGF2|ChunkType=head|LTranslit=kahanā|Stype=declarative|Tam=yA|Translit=kahā|Vib=या_जा+ता_था
+26	जाता	जाना	AUX	VAUX	Aspect=Imp|Gender=Masc|Number=Sing|VerbForm=Part	25	aux:pass	_	ChunkId=VGF2|ChunkType=child|LTranslit=jānā|Tam=wA|Translit=jātā|Vib=ता
+27	था	था	AUX	VAUX	Gender=Masc|Mood=Ind|Number=Sing|Tense=Past|VerbForm=Fin	25	aux:pass	_	ChunkId=VGF2|ChunkType=child|LTranslit=thā|Tam=WA|Translit=thā|Vib=था
+28	।	।	PUNCT	SYM	_	14	punct	_	ChunkId=BLK|ChunkType=head|LTranslit=.|Translit=.
+
