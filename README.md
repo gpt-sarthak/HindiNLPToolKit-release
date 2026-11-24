@@ -185,5 +185,7 @@ Shell access without SSH: `aws ssm start-session --target <instance-id>`, then
 
 The toolkit's own code is published without a licence grant (all rights
 reserved). Bundled data and third-party tools carry their own terms — see
-[`NOTICE.md`](NOTICE.md). In particular UD Hindi-HDTB is CC BY-NC-SA 4.0
-(non-commercial use).
+[`NOTICE.md`](NOTICE.md). In particular the UD Hindi-HDTB treebank
+(<https://universaldependencies.org/treebanks/hi_hdtb/index.html>) is
+CC BY-NC-SA 4.0, so **all the work in this repository (code, trained models,
+scores and results) is for non-commercial use only.**
